@@ -39,7 +39,9 @@ Prefer using the views when appropriate for the question."""
 
 
 def get_connection(read_only: bool = False):
-    return duckdb.connect(DB_PATH, read_only=read_only)
+    # Always open read-write; DuckDB raises ConnectionException if you mix
+    # read_only=True and read_only=False connections to the same file.
+    return duckdb.connect(DB_PATH)
 
 
 def init_db():
