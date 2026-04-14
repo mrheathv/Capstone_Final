@@ -1,0 +1,11 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# Generated runtime database (recreated on first launch)
+eval_app/eval.duckdb
+
+# Common Python/OS artifacts
+*.egg-info/
+.env
+.DS_Store

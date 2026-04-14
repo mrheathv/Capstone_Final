@@ -1,0 +1,6 @@
+streamlit
+duckdb
+pandas
+openai
+openpyxl
+tabulate
