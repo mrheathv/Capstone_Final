@@ -1,12 +1,14 @@
 """
 judge.py — LLM-as-judge for scoring conversational responses.
 
-Uses OpenAI's structured JSON output to score responses on 5 dimensions
-drawn from the Conversational_Rubric in Capstone_Final.xlsx.
+Supports any model/provider available via llm_client (OpenAI, Anthropic,
+Gemini, DeepSeek). The judge is intentionally separate from the CRM agent
+model so they can be evaluated with different LLMs.
 """
 
 import json
-from openai import OpenAI
+
+from llm_client import get_provider, text_complete
 
 JUDGE_SYSTEM_PROMPT = """You are an expert evaluator assessing AI sales assistant responses.
 You must be objective and base scores strictly on the criteria provided.
@@ -44,32 +46,67 @@ WEIGHTS = {
 }
 
 
+def _parse_json(text: str) -> dict:
+    """
+    Parse JSON from a model response, handling:
+    - Strict JSON strings
+    - JSON wrapped in markdown fences
+    - JSON embedded in surrounding prose
+    """
+    text = text.strip()
+    # Strip optional markdown fences
+    if text.startswith("```"):
+        lines = text.splitlines()
+        text = "\n".join(lines[1:])
+    if text.endswith("```"):
+        lines = text.splitlines()
+        text = "\n".join(lines[:-1])
+    text = text.strip()
+
+    # Direct parse
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    # Find first {...} block
+    start = text.find("{")
+    end = text.rfind("}")
+    if start != -1 and end != -1:
+        try:
+            return json.loads(text[start : end + 1])
+        except json.JSONDecodeError:
+            pass
+
+    raise ValueError(f"Could not parse JSON from judge response: {text[:300]}")
+
+
 def score_response(question: str, response: str, model: str = "gpt-4o-mini") -> dict:
     """
     Score an AI response on 5 dimensions using an LLM-as-judge.
+
+    Supports any provider (OpenAI, Anthropic, Gemini, DeepSeek) via
+    llm_client.  The model parameter selects both the provider and model.
 
     Returns a dict with keys: relevance, accuracy, completeness, actionability,
     safety, weighted_score, reasoning, error (if any).
     Pass threshold: weighted_score >= 3.0
     """
-    client = OpenAI()
+    messages = [
+        {"role": "system", "content": JUDGE_SYSTEM_PROMPT},
+        {
+            "role": "user",
+            "content": JUDGE_USER_PROMPT.format(question=question, response=response),
+        },
+    ]
 
     try:
-        completion = client.chat.completions.create(
-            model=model,
-            response_format={"type": "json_object"},
-            messages=[
-                {"role": "system", "content": JUDGE_SYSTEM_PROMPT},
-                {"role": "user", "content": JUDGE_USER_PROMPT.format(
-                    question=question,
-                    response=response
-                )},
-            ],
-            temperature=0,
-        )
+        provider = get_provider(model)
+        # Anthropic doesn't support strict JSON mode — parse from text instead
+        use_json_mode = provider != "anthropic"
 
-        raw = completion.choices[0].message.content
-        scores = json.loads(raw)
+        content, _ = text_complete(model, messages, temperature=0, json_mode=use_json_mode)
+        scores = _parse_json(content)
 
         # Clamp all dimension scores to 1–5
         for dim in WEIGHTS:
