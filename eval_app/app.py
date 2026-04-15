@@ -32,19 +32,27 @@ st.title("🧪 LLM Evaluation Suite")
 st.caption("Evaluate RAG chatbot quality across Conversational, SQL, and Performance dimensions.")
 
 AVAILABLE_MODELS = [
-    # ── Latest flagship ────────────────────────────────────────────────────────
-    "gpt-4.1",           # Best instruction-following; top RAG accuracy
-    "gpt-4.1-mini",      # Fast & cost-efficient; strong RAG performance
-    "gpt-4.1-nano",      # Fastest / cheapest; good for high-volume eval runs
-    # ── GPT-4o family ─────────────────────────────────────────────────────────
-    "gpt-4o",            # Multimodal flagship; excellent context synthesis
-    "gpt-4o-mini",       # Popular balanced choice for RAG pipelines
-    # ── Reasoning models (good for complex multi-hop RAG) ─────────────────────
-    "o3-mini",           # Fast reasoning; strong at multi-step SQL + RAG
-    "o1-mini",           # Earlier reasoning model; solid for analytical queries
-    # ── Legacy ────────────────────────────────────────────────────────────────
+    # ── OpenAI ────────────────────────────────────────────────────────────────
+    "gpt-4.1",            # Latest flagship; best instruction-following for RAG
+    "gpt-4.1-mini",       # Fast & cost-efficient; strong RAG performance
+    "gpt-4.1-nano",       # Fastest/cheapest; good for high-volume eval runs
+    "gpt-4o",             # Multimodal flagship; excellent context synthesis
+    "gpt-4o-mini",        # Popular balanced choice for RAG pipelines
+    "o3-mini",            # Reasoning model; strong at multi-step SQL + RAG
+    "o1-mini",            # Reasoning model; solid for analytical queries
     "gpt-4-turbo",
     "gpt-3.5-turbo",
+    # ── Anthropic (requires ANTHROPIC_API_KEY) ────────────────────────────────
+    "claude-3-5-sonnet-20241022",   # Excellent reasoning + instruction following
+    "claude-3-5-haiku-20241022",    # Fast & efficient; great RAG retrieval
+    "claude-3-opus-20240229",       # Most capable Claude 3; strong for complex RAG
+    # ── Google Gemini (requires GEMINI_API_KEY) ───────────────────────────────
+    "gemini-2.0-flash",   # Fast; strong RAG with large context window
+    "gemini-1.5-pro",     # Long context (1M tokens); deep document RAG
+    "gemini-2.5-pro",     # Latest; top-tier reasoning + RAG accuracy
+    # ── DeepSeek (requires DEEPSEEK_API_KEY) ─────────────────────────────────
+    "deepseek-chat",      # DeepSeek-V3; competitive with GPT-4o for RAG
+    "deepseek-reasoner",  # DeepSeek-R1; reasoning-focused, good for SQL+RAG
 ]
 
 CATEGORIES = ["conversational", "sql", "performance"]
@@ -54,10 +62,24 @@ with st.sidebar:
     st.header("Settings")
 
     selected_model = st.selectbox(
-        "OpenAI Model",
+        "Evaluation Model",
         AVAILABLE_MODELS,
         index=0,
-        help="Model used when running evaluations",
+        help="Model used as the CRM salesbot agent during evaluations",
+    )
+
+    # Default judge to gpt-4o-mini if available, otherwise first model
+    _default_judge_idx = next(
+        (i for i, m in enumerate(AVAILABLE_MODELS) if m == "gpt-4o-mini"), 0
+    )
+    selected_judge_model = st.selectbox(
+        "Judge Model",
+        AVAILABLE_MODELS,
+        index=_default_judge_idx,
+        help=(
+            "Separate model used to score conversational responses. "
+            "Can be a different provider than the evaluation model."
+        ),
     )
 
     prompts_list = db.get_prompts()
@@ -95,8 +117,37 @@ with tab_tests:
         ["Conversational", "SQL", "Performance"]
     )
 
+    def _render_rubric(category: str):
+        rubric = db.RUBRICS.get(category, [])
+        if not rubric:
+            return
+        with st.expander("📐 Scoring Rubric"):
+            if category == "conversational":
+                st.dataframe(
+                    pd.DataFrame(rubric),
+                    column_config={
+                        "dimension":   st.column_config.TextColumn("Dimension"),
+                        "weight":      st.column_config.TextColumn("Weight"),
+                        "description": st.column_config.TextColumn("Description"),
+                    },
+                    hide_index=True,
+                    use_container_width=True,
+                )
+            else:
+                st.dataframe(
+                    pd.DataFrame(rubric),
+                    column_config={
+                        "criterion":   st.column_config.TextColumn("Criterion"),
+                        "description": st.column_config.TextColumn("Description"),
+                    },
+                    hide_index=True,
+                    use_container_width=True,
+                )
+
     def _render_test_tab(category: str, tab):
         with tab:
+            _render_rubric(category)
+
             cases = db.get_test_cases(category)
 
             col_add, col_del = st.columns([1, 1])
@@ -108,6 +159,10 @@ with tab_tests:
                         q = st.text_area("Question *", key=f"q_{category}")
                         if category == "sql":
                             g = st.text_area("Golden SQL", key=f"g_{category}")
+                            er = st.number_input(
+                                "Expected Rows (optional, 0 = skip)",
+                                min_value=0, key=f"er_{category}",
+                            )
                         elif category == "performance":
                             er = st.number_input("Expected Rows (optional, 0 = skip)", min_value=0, key=f"er_{category}")
                             tt = st.number_input("Time Threshold (ms)", min_value=100, value=10000, key=f"tt_{category}")
@@ -117,12 +172,19 @@ with tab_tests:
                                 st.error("Question is required.")
                             else:
                                 if category == "sql":
-                                    db.add_test_case(category=category, question=q.strip(),
-                                                     golden_sql=g.strip() or None)
+                                    db.add_test_case(
+                                        category=category,
+                                        question=q.strip(),
+                                        golden_sql=g.strip() or None,
+                                        expected_rows=int(er) if er else None,
+                                    )
                                 elif category == "performance":
-                                    db.add_test_case(category=category, question=q.strip(),
-                                                     expected_rows=int(er) if er else None,
-                                                     time_threshold_ms=float(tt))
+                                    db.add_test_case(
+                                        category=category,
+                                        question=q.strip(),
+                                        expected_rows=int(er) if er else None,
+                                        time_threshold_ms=float(tt),
+                                    )
                                 else:
                                     db.add_test_case(category=category, question=q.strip())
                                 st.success("Test case added.")
@@ -136,7 +198,7 @@ with tab_tests:
             df = pd.DataFrame(cases)
             display_cols = ["id", "question"]
             if category == "sql":
-                display_cols += ["golden_sql"]
+                display_cols += ["golden_sql", "expected_rows"]
             elif category == "performance":
                 display_cols += ["expected_rows", "time_threshold_ms"]
 
@@ -146,11 +208,11 @@ with tab_tests:
             edited = st.data_editor(
                 df_display,
                 column_config={
-                    "select": st.column_config.CheckboxColumn("Del?", width="small"),
-                    "id": st.column_config.NumberColumn("ID", disabled=True, width="small"),
-                    "question": st.column_config.TextColumn("Question", width="large"),
-                    "golden_sql": st.column_config.TextColumn("Golden SQL", width="large"),
-                    "expected_rows": st.column_config.NumberColumn("Exp. Rows"),
+                    "select":            st.column_config.CheckboxColumn("Del?", width="small"),
+                    "id":                st.column_config.NumberColumn("ID", disabled=True, width="small"),
+                    "question":          st.column_config.TextColumn("Question", width="large"),
+                    "golden_sql":        st.column_config.TextColumn("Golden SQL", width="large"),
+                    "expected_rows":     st.column_config.NumberColumn("Exp. Rows", help="Leave blank to skip row-count check"),
                     "time_threshold_ms": st.column_config.NumberColumn("Threshold (ms)"),
                 },
                 use_container_width=True,
@@ -165,6 +227,9 @@ with tab_tests:
                     updates = {"question": row["question"]}
                     if category == "sql":
                         updates["golden_sql"] = row.get("golden_sql")
+                        updates["expected_rows"] = (
+                            int(row["expected_rows"]) if pd.notna(row.get("expected_rows")) else None
+                        )
                     elif category == "performance":
                         updates["expected_rows"] = (
                             int(row["expected_rows"]) if pd.notna(row.get("expected_rows")) else None
@@ -296,12 +361,19 @@ with tab_run:
 
         selected_prompt_ids = [pid for pid, checked in prompt_selections.items() if checked]
 
-        st.write("**Model:**")
+        st.write("**Models:**")
         run_model = st.selectbox(
-            "Model for this run",
+            "Evaluation model",
             AVAILABLE_MODELS,
             index=AVAILABLE_MODELS.index(selected_model),
             key="run_model_select",
+        )
+        run_judge_model = st.selectbox(
+            "Judge model",
+            AVAILABLE_MODELS,
+            index=AVAILABLE_MODELS.index(selected_judge_model),
+            key="run_judge_model_select",
+            help="Model used to score conversational responses (can differ from evaluation model)",
         )
 
     with col_run:
@@ -355,11 +427,16 @@ with tab_run:
                             try:
                                 if category == "conversational":
                                     result = evaluator.run_conversational_test(
-                                        tc["question"], run_model, prompt_dict
+                                        tc["question"], run_model, prompt_dict,
+                                        judge_model=run_judge_model,
                                     )
                                 elif category == "sql":
                                     result = evaluator.run_sql_test(
-                                        tc["question"], tc.get("golden_sql") or "", run_model, prompt_dict
+                                        tc["question"],
+                                        tc.get("golden_sql") or "",
+                                        run_model,
+                                        prompt_dict,
+                                        expected_rows=tc.get("expected_rows"),
                                     )
                                 else:  # performance
                                     result = evaluator.run_performance_test(

@@ -11,6 +11,31 @@ from typing import Optional
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "eval.duckdb")
 
+# ── Scoring rubrics (sourced from Capstone_Final.xlsx rubric sheets) ──────────
+RUBRICS: dict[str, list[dict]] = {
+    "conversational": [
+        {"dimension": "Relevance",     "weight": "25%", "description": "Directly addresses the question"},
+        {"dimension": "Accuracy",      "weight": "30%", "description": "Claims supported by CRM data"},
+        {"dimension": "Completeness",  "weight": "20%", "description": "Facts, reasoning, and next steps included"},
+        {"dimension": "Actionability", "weight": "10%", "description": "Recommendations are prioritized and useful"},
+        {"dimension": "Safety",        "weight": "15%", "description": "No unsafe actions or fabricated data"},
+    ],
+    "sql": [
+        {"criterion": "Valid SQL",  "description": "Generated SQL is syntactically correct and schema-aligned; no destructive statements"},
+        {"criterion": "Executed",   "description": "SQL runs against the database without raising an error"},
+        {"criterion": "Accurate",   "description": "Result rows and values match the golden SQL output (column aliases are ignored)"},
+        {"criterion": "Rows OK",    "description": "Row count matches expected_rows when specified (optional check)"},
+        {"criterion": "Pass",       "description": "Valid SQL + Executed + Accurate (+ Rows OK if expected_rows set)"},
+    ],
+    "performance": [
+        {"criterion": "Valid SQL",  "description": "Generated SQL is syntactically correct and schema-aligned"},
+        {"criterion": "Executed",   "description": "SQL runs against the database without raising an error"},
+        {"criterion": "Time OK",    "description": "Total time (LLM generation + DB execution) is under the configured ms threshold"},
+        {"criterion": "Rows OK",    "description": "Actual row count matches the expected row count for the query"},
+        {"criterion": "Pass",       "description": "All four checks above are true"},
+    ],
+}
+
 DEFAULT_SYSTEM_PROMPT = """You are a helpful sales assistant with access to a CRM database.
 
 Current User: Evaluator

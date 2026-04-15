@@ -3,8 +3,9 @@ evaluator.py — Evaluation runners for all three test categories.
 
 Reuses schema/context from the reference app but provides self-contained
 versions of SQL generation and the agent loop that:
-  - Accept a configurable OpenAI model name
+  - Accept any model from any supported provider (OpenAI, Anthropic, Gemini, DeepSeek)
   - Accept a custom prompt dict (system_prompt, sql_prompt)
+  - Accept a separate judge_model for conversational scoring
   - Do not depend on streamlit session_state
 """
 
@@ -21,9 +22,6 @@ _REF_APP = os.path.join(
 if _REF_APP not in sys.path:
     sys.path.insert(0, _REF_APP)
 
-# Fix the relative DB_PATH in both connection and schema modules before use.
-# connection.py defines DB_PATH as a module-level string; schema.py copies it with
-# `from .connection import DB_PATH` — so we must patch both after importing them.
 _ABS_DB_PATH = os.path.abspath(os.path.join(
     os.path.dirname(__file__), "..", "Reference Files",
     "rag_salesbot-main", "db", "sales.duckdb"
@@ -38,15 +36,13 @@ from database.connection import db_query
 from database.schema import get_schema_info, get_business_context
 
 import duckdb
-from openai import OpenAI
 
+import llm_client
+from llm_client import get_provider, text_complete
 import judge as _judge
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _openai_client() -> OpenAI:
-    return OpenAI()
-
+# ── SQL helpers ───────────────────────────────────────────────────────────────
 
 def _clean_sql(raw: str) -> str:
     """Strip markdown fences from an LLM-generated SQL string."""
@@ -71,19 +67,14 @@ def _validate_sql(sql: str) -> tuple[bool, str]:
 
 
 def _dataframes_match(df_a, df_b, tolerance: float = 0.01) -> bool:
-    """
-    Return True if two DataFrames contain the same rows (order-insensitive).
-    Numeric values are compared with relative tolerance.
-    """
+    """Return True if two DataFrames contain the same rows (order-insensitive)."""
     if df_a is None or df_b is None:
         return False
     if df_a.shape != df_b.shape:
         return False
-    # Sort both by all columns for order-insensitive comparison
     try:
         a = df_a.sort_values(by=list(df_a.columns)).reset_index(drop=True)
         b = df_b.sort_values(by=list(df_b.columns)).reset_index(drop=True)
-        # Compare column by column
         for col_a, col_b in zip(a.columns, b.columns):
             import pandas as pd
             series_a = a[col_a]
@@ -99,16 +90,16 @@ def _dataframes_match(df_a, df_b, tolerance: float = 0.01) -> bool:
         return False
 
 
-# ── SQL Generation (prompt-aware) ─────────────────────────────────────────────
+# ── SQL Generation (prompt-aware, multi-provider) ─────────────────────────────
 
 def _generate_sql(question: str, model: str, sql_prompt_template: str,
                   max_attempts: int = 2) -> tuple[str, str, float, int]:
     """
     Generate SQL for *question* using *model* and the given prompt template.
+    Supports all providers via llm_client.text_complete.
 
     Returns: (sql, error_message, llm_latency_ms, total_tokens)
     """
-    client = _openai_client()
     schema = get_schema_info()
     context = get_business_context()
 
@@ -131,22 +122,20 @@ def _generate_sql(question: str, model: str, sql_prompt_template: str,
             )
 
         t0 = time.perf_counter()
-        resp = client.chat.completions.create(
-            model=model,
-            messages=[{"role": "user", "content": prompt}],
+        content, tokens = text_complete(
+            model, [{"role": "user", "content": prompt}]
         )
         llm_latency_ms += (time.perf_counter() - t0) * 1000
-        total_tokens += resp.usage.total_tokens if resp.usage else 0
+        total_tokens += tokens
 
-        sql = _clean_sql(resp.choices[0].message.content or "")
-
+        sql = _clean_sql(content)
         valid, err = _validate_sql(sql)
         if not valid:
             last_error, last_sql = err, sql
             continue
 
         try:
-            db_query(sql)           # test-execute
+            db_query(sql)  # test-execute
             return sql, "", llm_latency_ms, total_tokens
         except Exception as exc:
             last_error, last_sql = str(exc), sql
@@ -154,7 +143,7 @@ def _generate_sql(question: str, model: str, sql_prompt_template: str,
     return last_sql, last_error, llm_latency_ms, total_tokens
 
 
-# ── Conversational agent (standalone, no streamlit) ──────────────────────────
+# ── Tool handlers ─────────────────────────────────────────────────────────────
 
 def _open_work_standalone(args: dict) -> str:
     """Streamlit-free version of open_work_handler."""
@@ -205,6 +194,8 @@ def _text_to_sql_standalone(args: dict, model: str, sql_prompt_template: str) ->
         return f"Error executing query: {exc}\n\nSQL:\n```sql\n{sql}\n```"
 
 
+# ── Tool spec (OpenAI format) ─────────────────────────────────────────────────
+
 _TOOLS_SPEC = [
     {
         "type": "function",
@@ -237,13 +228,22 @@ _TOOLS_SPEC = [
 ]
 
 
-def _run_agent(question: str, system_prompt: str, model: str,
-               sql_prompt_template: str, max_iterations: int = 5) -> tuple[str, float]:
-    """
-    Standalone ReAct agent loop.
-    Returns (answer, total_llm_latency_ms).
-    """
-    client = _openai_client()
+# ── Agent loops ───────────────────────────────────────────────────────────────
+
+def _dispatch_tool(tool_name: str, tool_args: dict, model: str,
+                   sql_prompt_template: str) -> str:
+    if tool_name == "text_to_sql":
+        return _text_to_sql_standalone(tool_args, model, sql_prompt_template)
+    if tool_name == "open_work":
+        return _open_work_standalone(tool_args)
+    return f"Unknown tool: {tool_name}"
+
+
+def _run_agent_openai_compat(question: str, system_prompt: str, model: str,
+                              sql_prompt_template: str,
+                              max_iterations: int = 5) -> tuple[str, float]:
+    """ReAct agent loop for OpenAI-compatible providers (OpenAI, Deepseek, Gemini)."""
+    client = llm_client.get_openai_compat_client(model)
     messages = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": question},
@@ -267,32 +267,96 @@ def _run_agent(question: str, system_prompt: str, model: str,
         messages.append(msg)
 
         for tc in msg.tool_calls:
-            tool_name = tc.function.name
-            tool_args = json.loads(tc.function.arguments)
-
-            if tool_name == "text_to_sql":
-                result = _text_to_sql_standalone(tool_args, model, sql_prompt_template)
-            elif tool_name == "open_work":
-                result = _open_work_standalone(tool_args)
-            else:
-                result = f"Unknown tool: {tool_name}"
-
+            result = _dispatch_tool(
+                tc.function.name, json.loads(tc.function.arguments),
+                model, sql_prompt_template,
+            )
             messages.append({
                 "role": "tool",
                 "tool_call_id": tc.id,
-                "name": tool_name,
+                "name": tc.function.name,
                 "content": result,
             })
 
     return "Processing limit reached without a final answer.", total_latency_ms
 
 
+def _run_agent_anthropic(question: str, system_prompt: str, model: str,
+                         sql_prompt_template: str,
+                         max_iterations: int = 5) -> tuple[str, float]:
+    """ReAct agent loop for Anthropic Claude models."""
+    client = llm_client.get_anthropic_client()
+    anthropic_tools = llm_client.openai_tools_to_anthropic(_TOOLS_SPEC)
+
+    messages: list[dict] = [{"role": "user", "content": question}]
+    total_latency_ms = 0.0
+
+    for _ in range(max_iterations):
+        t0 = time.perf_counter()
+        resp = client.messages.create(
+            model=model,
+            max_tokens=4096,
+            system=system_prompt,
+            messages=messages,
+            tools=anthropic_tools,
+        )
+        total_latency_ms += (time.perf_counter() - t0) * 1000
+
+        # End turn — extract text answer
+        if resp.stop_reason == "end_turn":
+            for block in resp.content:
+                if hasattr(block, "text"):
+                    return block.text, total_latency_ms
+            return "No answer generated.", total_latency_ms
+
+        # Serialize assistant message and collect tool results
+        messages.append({
+            "role": "assistant",
+            "content": llm_client.anthropic_content_to_dicts(resp.content),
+        })
+
+        tool_results = []
+        for block in resp.content:
+            if block.type == "tool_use":
+                result = _dispatch_tool(
+                    block.name, block.input, model, sql_prompt_template
+                )
+                tool_results.append({
+                    "type": "tool_result",
+                    "tool_use_id": block.id,
+                    "content": result,
+                })
+
+        if tool_results:
+            messages.append({"role": "user", "content": tool_results})
+
+    return "Processing limit reached without a final answer.", total_latency_ms
+
+
+def _run_agent(question: str, system_prompt: str, model: str,
+               sql_prompt_template: str, max_iterations: int = 5) -> tuple[str, float]:
+    """Dispatch to the correct agent loop based on provider."""
+    if get_provider(model) == "anthropic":
+        return _run_agent_anthropic(
+            question, system_prompt, model, sql_prompt_template, max_iterations
+        )
+    return _run_agent_openai_compat(
+        question, system_prompt, model, sql_prompt_template, max_iterations
+    )
+
+
 # ── Public evaluation functions ────────────────────────────────────────────────
 
 def run_sql_test(question: str, golden_sql: str, model: str,
-                 prompt: dict) -> dict:
+                 prompt: dict, expected_rows: int = None) -> dict:
     """
     Evaluate SQL generation for one test case.
+
+    Pass criteria:
+      - valid SELECT query generated
+      - query executes without error
+      - result matches golden_sql output (when golden_sql provided)
+      - row count matches expected_rows (when expected_rows provided)
 
     Returns a result dict suitable for eval_db.save_result().
     """
@@ -303,7 +367,9 @@ def run_sql_test(question: str, golden_sql: str, model: str,
         question, model, sql_prompt
     )
 
-    valid, valid_err = _validate_sql(generated_sql) if generated_sql else (False, "No SQL generated")
+    valid, valid_err = (
+        _validate_sql(generated_sql) if generated_sql else (False, "No SQL generated")
+    )
     executed = False
     accurate = False
     result_df = None
@@ -328,13 +394,19 @@ def run_sql_test(question: str, golden_sql: str, model: str,
         except Exception:
             accurate = False
 
+    rows_ok = (rows_returned == expected_rows) if (executed and expected_rows is not None) else True
+
     total_time_ms = (time.perf_counter() - t_start) * 1000
-    passed = valid and executed and (accurate if golden_sql else True)
+    passed = valid and executed and (accurate if golden_sql else True) and rows_ok
+
+    detail_parts = [f"Valid: {valid}", f"Executed: {executed}", f"Accurate: {accurate}"]
+    if expected_rows is not None:
+        detail_parts.append(f"Rows OK: {rows_ok} (got {rows_returned}, expected {expected_rows})")
 
     return {
         "passed": passed,
         "generated_sql": generated_sql,
-        "llm_response": f"Valid: {valid} | Executed: {executed} | Accurate: {accurate}",
+        "llm_response": " | ".join(detail_parts),
         "error_message": exec_error if not passed else None,
         "llm_latency_ms": llm_latency_ms,
         "execution_ms": exec_ms,
@@ -345,10 +417,11 @@ def run_sql_test(question: str, golden_sql: str, model: str,
     }
 
 
-def run_conversational_test(question: str, model: str, prompt: dict) -> dict:
+def run_conversational_test(question: str, model: str, prompt: dict,
+                             judge_model: str = "gpt-4o-mini") -> dict:
     """
     Evaluate the full agent loop on one conversational question.
-    Scores the response using LLM-as-judge.
+    Scores the response using LLM-as-judge with a separately configurable model.
     """
     system_prompt = prompt.get("system_prompt", "")
     sql_prompt = prompt.get("sql_prompt", "")
@@ -357,7 +430,7 @@ def run_conversational_test(question: str, model: str, prompt: dict) -> dict:
     answer, llm_latency_ms = _run_agent(question, system_prompt, model, sql_prompt)
     total_time_ms = (time.perf_counter() - t_start) * 1000
 
-    scores = _judge.score_response(question, answer, model)
+    scores = _judge.score_response(question, answer, judge_model)
     weighted = scores.get("weighted_score") or 0.0
     passed = (weighted >= 3.0) if scores.get("error") is None else False
 
@@ -383,9 +456,7 @@ def run_conversational_test(question: str, model: str, prompt: dict) -> dict:
 def run_performance_test(question: str, expected_rows: int,
                          time_threshold_ms: float, model: str,
                          prompt: dict) -> dict:
-    """
-    Evaluate SQL generation and measure performance metrics.
-    """
+    """Evaluate SQL generation and measure performance metrics."""
     sql_prompt = prompt.get("sql_prompt", "")
     t_start = time.perf_counter()
 
@@ -393,7 +464,9 @@ def run_performance_test(question: str, expected_rows: int,
         question, model, sql_prompt
     )
 
-    valid, valid_err = _validate_sql(generated_sql) if generated_sql else (False, "No SQL generated")
+    valid, valid_err = (
+        _validate_sql(generated_sql) if generated_sql else (False, "No SQL generated")
+    )
     executed = False
     exec_ms = 0.0
     rows_returned = None
