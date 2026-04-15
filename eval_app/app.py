@@ -118,31 +118,93 @@ with tab_tests:
     )
 
     def _render_rubric(category: str):
-        rubric = db.RUBRICS.get(category, [])
+        """Render an editable scoring rubric panel for the given category."""
+        rubric = db.get_rubric(category)
         if not rubric:
             return
-        with st.expander("📐 Scoring Rubric"):
+
+        with st.expander("📐 Scoring Rubric", expanded=False):
+            df_rub = pd.DataFrame(rubric)
+
             if category == "conversational":
-                st.dataframe(
-                    pd.DataFrame(rubric),
+                st.caption(
+                    "Weights and descriptions drive the LLM judge — edits here "
+                    "take effect on the next evaluation run. Weights are "
+                    "auto-normalized so they don't have to sum to exactly 1.0."
+                )
+                # Show total weight so user knows if they're off
+                total_w = df_rub["weight"].sum()
+                if abs(total_w - 1.0) > 0.001:
+                    st.warning(f"Weights sum to {total_w:.2f} (will be normalized to 1.0 automatically).")
+
+                edited_rub = st.data_editor(
+                    df_rub[["id", "label", "weight", "description"]],
                     column_config={
-                        "dimension":   st.column_config.TextColumn("Dimension"),
-                        "weight":      st.column_config.TextColumn("Weight"),
-                        "description": st.column_config.TextColumn("Description"),
+                        "id":          st.column_config.NumberColumn("ID", disabled=True, width="small"),
+                        "label":       st.column_config.TextColumn("Dimension", disabled=True),
+                        "weight":      st.column_config.NumberColumn(
+                            "Weight", min_value=0.0, max_value=1.0, format="%.2f",
+                            help="Relative weight (auto-normalized). Must be > 0."
+                        ),
+                        "description": st.column_config.TextColumn("Description (sent to judge)", width="large"),
                     },
                     hide_index=True,
                     use_container_width=True,
+                    key=f"rubric_editor_{category}",
+                    num_rows="fixed",
                 )
+
+                col_save, col_reset = st.columns([1, 1])
+                with col_save:
+                    if st.button("💾 Save Rubric", key=f"save_rubric_{category}"):
+                        for _, row in edited_rub.iterrows():
+                            db.update_rubric_item(
+                                int(row["id"]),
+                                weight=float(row["weight"]),
+                                description=str(row["description"]),
+                            )
+                        st.success("Rubric saved — next eval run will use the updated rubric.")
+                        st.rerun()
+                with col_reset:
+                    if st.button("↩️ Reset to Defaults", key=f"reset_rubric_{category}"):
+                        db.reset_rubric(category)
+                        st.success("Rubric reset to defaults.")
+                        st.rerun()
+
             else:
-                st.dataframe(
-                    pd.DataFrame(rubric),
+                # SQL / Performance — only descriptions are editable
+                st.caption(
+                    "These are the pass/fail criteria applied during evaluation. "
+                    "Edit descriptions to clarify or document your standards."
+                )
+                edited_rub = st.data_editor(
+                    df_rub[["id", "label", "description"]],
                     column_config={
-                        "criterion":   st.column_config.TextColumn("Criterion"),
-                        "description": st.column_config.TextColumn("Description"),
+                        "id":          st.column_config.NumberColumn("ID", disabled=True, width="small"),
+                        "label":       st.column_config.TextColumn("Criterion", disabled=True),
+                        "description": st.column_config.TextColumn("Description", width="large"),
                     },
                     hide_index=True,
                     use_container_width=True,
+                    key=f"rubric_editor_{category}",
+                    num_rows="fixed",
                 )
+
+                col_save, col_reset = st.columns([1, 1])
+                with col_save:
+                    if st.button("💾 Save Rubric", key=f"save_rubric_{category}"):
+                        for _, row in edited_rub.iterrows():
+                            db.update_rubric_item(
+                                int(row["id"]),
+                                description=str(row["description"]),
+                            )
+                        st.success("Descriptions saved.")
+                        st.rerun()
+                with col_reset:
+                    if st.button("↩️ Reset to Defaults", key=f"reset_rubric_{category}"):
+                        db.reset_rubric(category)
+                        st.success("Rubric reset to defaults.")
+                        st.rerun()
 
     def _render_test_tab(category: str, tab):
         with tab:

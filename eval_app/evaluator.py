@@ -40,6 +40,7 @@ import duckdb
 import llm_client
 from llm_client import get_provider, text_complete
 import judge as _judge
+import eval_db as _db
 
 
 # ── SQL helpers ───────────────────────────────────────────────────────────────
@@ -422,6 +423,8 @@ def run_conversational_test(question: str, model: str, prompt: dict,
     """
     Evaluate the full agent loop on one conversational question.
     Scores the response using LLM-as-judge with a separately configurable model.
+    The rubric (dimensions, weights, descriptions) is fetched live from the DB
+    so any edits made in the UI are immediately reflected in scoring.
     """
     system_prompt = prompt.get("system_prompt", "")
     sql_prompt = prompt.get("sql_prompt", "")
@@ -430,7 +433,8 @@ def run_conversational_test(question: str, model: str, prompt: dict,
     answer, llm_latency_ms = _run_agent(question, system_prompt, model, sql_prompt)
     total_time_ms = (time.perf_counter() - t_start) * 1000
 
-    scores = _judge.score_response(question, answer, judge_model)
+    rubric = _db.get_rubric("conversational")
+    scores = _judge.score_response(question, answer, judge_model, rubric=rubric)
     weighted = scores.get("weighted_score") or 0.0
     passed = (weighted >= 3.0) if scores.get("error") is None else False
 
