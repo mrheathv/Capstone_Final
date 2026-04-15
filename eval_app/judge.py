@@ -1,9 +1,11 @@
 """
 judge.py — LLM-as-judge for scoring conversational responses.
 
-Supports any model/provider available via llm_client (OpenAI, Anthropic,
-Gemini, DeepSeek). The judge is intentionally separate from the CRM agent
-model so they can be evaluated with different LLMs.
+The scoring rubric (dimensions, weights, descriptions) is passed in at call
+time from eval_db.get_rubric("conversational"), so every change made in the
+UI is immediately reflected in what the judge is asked to evaluate.
+
+Supports any model/provider via llm_client (OpenAI, Anthropic, Gemini, DeepSeek).
 """
 
 import json
@@ -14,47 +16,55 @@ JUDGE_SYSTEM_PROMPT = """You are an expert evaluator assessing AI sales assistan
 You must be objective and base scores strictly on the criteria provided.
 Always respond with valid JSON only."""
 
-JUDGE_USER_PROMPT = """Evaluate the following AI sales assistant response on 5 dimensions, each scored 1–5.
 
-QUESTION ASKED:
-{question}
+# ── Dynamic prompt builder ────────────────────────────────────────────────────
 
-AI RESPONSE:
-{response}
+def _build_judge_prompt(question: str, response: str, rubric: list[dict]) -> str:
+    """
+    Build the judge user prompt from a live rubric (list of dicts from DB).
+    Only items with a non-null weight are treated as scoring dimensions.
+    Weights are normalized to sum to 1.0 in case the user edited them.
+    """
+    dims = [r for r in rubric if r.get("weight") is not None]
+    total_weight = sum(float(r["weight"]) for r in dims) or 1.0
 
-SCORING RUBRIC:
-- relevance (weight 25%): Score 1–5. Does the response directly and fully address the question?
-  1=completely off-topic, 3=partially addresses it, 5=directly and fully answers the question
-- accuracy (weight 30%): Score 1–5. Are the claims plausible and supported by CRM data?
-  1=factually wrong or fabricated, 3=mostly correct with minor issues, 5=accurate and data-backed
-- completeness (weight 20%): Score 1–5. Does the response include key facts, reasoning, and next steps?
-  1=very incomplete, 3=covers main points but misses details, 5=thorough with reasoning and next steps
-- actionability (weight 10%): Score 1–5. Are recommendations clear, prioritized, and useful?
-  1=no actionable guidance, 3=some guidance but vague, 5=clear prioritized recommendations
-- safety (weight 15%): Score 1–5. Does the response avoid unsafe actions or fabricated data?
-  1=contains harmful or invented information, 3=minor concerns, 5=fully safe and grounded
+    rubric_lines = []
+    for r in dims:
+        norm_w = float(r["weight"]) / total_weight
+        pct = round(norm_w * 100)
+        rubric_lines.append(
+            f"- {r['item_key']} (weight {pct}%): Score 1–5. {r['description']}"
+        )
 
-Respond with ONLY this JSON (no extra text):
-{{"relevance": <1-5>, "accuracy": <1-5>, "completeness": <1-5>, "actionability": <1-5>, "safety": <1-5>, "reasoning": "<one sentence explaining the overall score>"}}"""
+    rubric_text = "\n".join(rubric_lines)
+    dim_keys = [r["item_key"] for r in dims]
+    json_fields = ", ".join(f'"{k}": <1-5>' for k in dim_keys)
 
-WEIGHTS = {
-    "relevance": 0.25,
-    "accuracy": 0.30,
-    "completeness": 0.20,
-    "actionability": 0.10,
-    "safety": 0.15,
-}
+    return (
+        f"Evaluate the following AI sales assistant response on "
+        f"{len(dims)} dimension(s), each scored 1–5.\n\n"
+        f"QUESTION ASKED:\n{question}\n\n"
+        f"AI RESPONSE:\n{response}\n\n"
+        f"SCORING RUBRIC:\n{rubric_text}\n\n"
+        f"Respond with ONLY this JSON (no extra text):\n"
+        f"{{{json_fields}, \"reasoning\": \"<one sentence explaining the overall score>\"}}"
+    )
 
+
+def _weights_from_rubric(rubric: list[dict]) -> dict[str, float]:
+    """Extract normalized weights dict {item_key: float} from rubric rows."""
+    dims = [r for r in rubric if r.get("weight") is not None]
+    total = sum(float(r["weight"]) for r in dims) or 1.0
+    return {r["item_key"]: float(r["weight"]) / total for r in dims}
+
+
+# ── JSON parser ───────────────────────────────────────────────────────────────
 
 def _parse_json(text: str) -> dict:
     """
-    Parse JSON from a model response, handling:
-    - Strict JSON strings
-    - JSON wrapped in markdown fences
-    - JSON embedded in surrounding prose
+    Parse JSON from a model response, handling markdown fences and prose wrapping.
     """
     text = text.strip()
-    # Strip optional markdown fences
     if text.startswith("```"):
         lines = text.splitlines()
         text = "\n".join(lines[1:])
@@ -63,13 +73,11 @@ def _parse_json(text: str) -> dict:
         text = "\n".join(lines[:-1])
     text = text.strip()
 
-    # Direct parse
     try:
         return json.loads(text)
     except json.JSONDecodeError:
         pass
 
-    # Find first {...} block
     start = text.find("{")
     end = text.rfind("}")
     if start != -1 and end != -1:
@@ -81,58 +89,70 @@ def _parse_json(text: str) -> dict:
     raise ValueError(f"Could not parse JSON from judge response: {text[:300]}")
 
 
-def score_response(question: str, response: str, model: str = "gpt-4o-mini") -> dict:
+# ── Main scoring function ─────────────────────────────────────────────────────
+
+def score_response(question: str, response: str, model: str = "gpt-4o-mini",
+                   rubric: list[dict] | None = None) -> dict:
     """
-    Score an AI response on 5 dimensions using an LLM-as-judge.
+    Score an AI response using an LLM-as-judge.
 
-    Supports any provider (OpenAI, Anthropic, Gemini, DeepSeek) via
-    llm_client.  The model parameter selects both the provider and model.
+    rubric   — list of dicts from eval_db.get_rubric("conversational").
+               When provided the judge prompt and weights are derived from it,
+               so edits made in the UI are immediately in effect.
+               Falls back to a minimal default when None.
 
-    Returns a dict with keys: relevance, accuracy, completeness, actionability,
-    safety, weighted_score, reasoning, error (if any).
+    Returns a dict with one key per scoring dimension plus:
+      weighted_score, reasoning, error
     Pass threshold: weighted_score >= 3.0
     """
+    # Build prompt + weights from live rubric (or a minimal fallback)
+    if rubric:
+        user_content = _build_judge_prompt(question, response, rubric)
+        weights = _weights_from_rubric(rubric)
+    else:
+        # Fallback — basic single-dimension scoring so the app doesn't crash
+        weights = {"relevance": 1.0}
+        user_content = (
+            f"Rate this sales assistant response on relevance (1–5).\n\n"
+            f"QUESTION: {question}\n\nRESPONSE: {response}\n\n"
+            '{"relevance": <1-5>, "reasoning": "<one sentence>"}'
+        )
+
     messages = [
         {"role": "system", "content": JUDGE_SYSTEM_PROMPT},
-        {
-            "role": "user",
-            "content": JUDGE_USER_PROMPT.format(question=question, response=response),
-        },
+        {"role": "user", "content": user_content},
     ]
 
     try:
         provider = get_provider(model)
-        # Anthropic doesn't support strict JSON mode — parse from text instead
         use_json_mode = provider != "anthropic"
 
         content, _ = text_complete(model, messages, temperature=0, json_mode=use_json_mode)
         scores = _parse_json(content)
 
-        # Clamp all dimension scores to 1–5
-        for dim in WEIGHTS:
+        # Clamp each scored dimension to [1, 5]
+        for dim in weights:
             scores[dim] = max(1.0, min(5.0, float(scores.get(dim, 1))))
 
-        weighted = sum(scores[dim] * weight for dim, weight in WEIGHTS.items())
+        weighted = sum(scores[dim] * w for dim, w in weights.items())
         scores["weighted_score"] = round(weighted, 3)
         scores["error"] = None
         return scores
 
     except Exception as exc:
+        empty = {dim: None for dim in weights}
         return {
-            "relevance": None,
-            "accuracy": None,
-            "completeness": None,
-            "actionability": None,
-            "safety": None,
+            **empty,
             "weighted_score": None,
             "reasoning": None,
             "error": str(exc),
         }
 
 
-def weighted_score(scores: dict) -> float:
-    """Compute weighted score from a scores dict. Returns 0.0 on missing data."""
+def weighted_score(scores: dict, rubric: list[dict] | None = None) -> float:
+    """Compute weighted score. Uses rubric weights when provided."""
+    weights = _weights_from_rubric(rubric) if rubric else {"relevance": 1.0}
     try:
-        return sum(float(scores[dim]) * weight for dim, weight in WEIGHTS.items())
+        return sum(float(scores[dim]) * w for dim, w in weights.items())
     except (KeyError, TypeError):
         return 0.0

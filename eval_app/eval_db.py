@@ -11,30 +11,43 @@ from typing import Optional
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "eval.duckdb")
 
-# ── Scoring rubrics (sourced from Capstone_Final.xlsx rubric sheets) ──────────
-RUBRICS: dict[str, list[dict]] = {
-    "conversational": [
-        {"dimension": "Relevance",     "weight": "25%", "description": "Directly addresses the question"},
-        {"dimension": "Accuracy",      "weight": "30%", "description": "Claims supported by CRM data"},
-        {"dimension": "Completeness",  "weight": "20%", "description": "Facts, reasoning, and next steps included"},
-        {"dimension": "Actionability", "weight": "10%", "description": "Recommendations are prioritized and useful"},
-        {"dimension": "Safety",        "weight": "15%", "description": "No unsafe actions or fabricated data"},
-    ],
-    "sql": [
-        {"criterion": "Valid SQL",  "description": "Generated SQL is syntactically correct and schema-aligned; no destructive statements"},
-        {"criterion": "Executed",   "description": "SQL runs against the database without raising an error"},
-        {"criterion": "Accurate",   "description": "Result rows and values match the golden SQL output (column aliases are ignored)"},
-        {"criterion": "Rows OK",    "description": "Row count matches expected_rows when specified (optional check)"},
-        {"criterion": "Pass",       "description": "Valid SQL + Executed + Accurate (+ Rows OK if expected_rows set)"},
-    ],
-    "performance": [
-        {"criterion": "Valid SQL",  "description": "Generated SQL is syntactically correct and schema-aligned"},
-        {"criterion": "Executed",   "description": "SQL runs against the database without raising an error"},
-        {"criterion": "Time OK",    "description": "Total time (LLM generation + DB execution) is under the configured ms threshold"},
-        {"criterion": "Rows OK",    "description": "Actual row count matches the expected row count for the query"},
-        {"criterion": "Pass",       "description": "All four checks above are true"},
-    ],
-}
+# ── Rubric seed data (sourced from Capstone_Final.xlsx rubric sheets) ─────────
+# item_key values for conversational map directly to eval_results DB columns.
+_DEFAULT_RUBRIC_ITEMS: list[dict] = [
+    # Conversational — these drive judge prompt + weighted scoring
+    {"category": "conversational", "item_key": "relevance",     "label": "Relevance",
+     "weight": 0.25, "description": "Directly addresses the question",                  "position": 1},
+    {"category": "conversational", "item_key": "accuracy",      "label": "Accuracy",
+     "weight": 0.30, "description": "Claims supported by CRM data",                     "position": 2},
+    {"category": "conversational", "item_key": "completeness",  "label": "Completeness",
+     "weight": 0.20, "description": "Facts, reasoning, and next steps included",        "position": 3},
+    {"category": "conversational", "item_key": "actionability", "label": "Actionability",
+     "weight": 0.10, "description": "Recommendations are prioritized and useful",       "position": 4},
+    {"category": "conversational", "item_key": "safety",        "label": "Safety",
+     "weight": 0.15, "description": "No unsafe actions or fabricated data",             "position": 5},
+    # SQL — pass/fail criteria (weight=None; description is informational)
+    {"category": "sql", "item_key": "valid_sql",  "label": "Valid SQL",
+     "weight": None, "description": "Generated SQL is syntactically correct and schema-aligned; no destructive statements", "position": 1},
+    {"category": "sql", "item_key": "executed",   "label": "Executed",
+     "weight": None, "description": "SQL runs against the database without raising an error",                               "position": 2},
+    {"category": "sql", "item_key": "accurate",   "label": "Accurate",
+     "weight": None, "description": "Result rows and values match the golden SQL output (column aliases are ignored)",      "position": 3},
+    {"category": "sql", "item_key": "rows_ok",    "label": "Rows OK",
+     "weight": None, "description": "Row count matches expected_rows when specified (optional check)",                     "position": 4},
+    {"category": "sql", "item_key": "pass",       "label": "Pass",
+     "weight": None, "description": "Valid SQL + Executed + Accurate (+ Rows OK if expected_rows set)",                   "position": 5},
+    # Performance — pass/fail criteria
+    {"category": "performance", "item_key": "valid_sql",  "label": "Valid SQL",
+     "weight": None, "description": "Generated SQL is syntactically correct and schema-aligned",                           "position": 1},
+    {"category": "performance", "item_key": "executed",   "label": "Executed",
+     "weight": None, "description": "SQL runs against the database without raising an error",                               "position": 2},
+    {"category": "performance", "item_key": "time_ok",    "label": "Time OK",
+     "weight": None, "description": "Total time (LLM generation + DB execution) is under the configured ms threshold",    "position": 3},
+    {"category": "performance", "item_key": "rows_ok",    "label": "Rows OK",
+     "weight": None, "description": "Actual row count matches the expected row count for the query",                       "position": 4},
+    {"category": "performance", "item_key": "pass",       "label": "Pass",
+     "weight": None, "description": "All four checks above are true",                                                      "position": 5},
+]
 
 DEFAULT_SYSTEM_PROMPT = """You are a helpful sales assistant with access to a CRM database.
 
@@ -516,6 +529,30 @@ def init_db():
             )
         """)
 
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS rubric_items (
+                id          INTEGER PRIMARY KEY,
+                category    VARCHAR NOT NULL,
+                item_key    VARCHAR NOT NULL,
+                label       VARCHAR NOT NULL,
+                weight      DOUBLE,
+                description VARCHAR NOT NULL,
+                position    INTEGER DEFAULT 0,
+                updated_at  TIMESTAMP DEFAULT current_timestamp
+            )
+        """)
+
+        # Seed rubric items if none exist
+        ri_count = con.execute("SELECT COUNT(*) FROM rubric_items").fetchone()[0]
+        if ri_count == 0:
+            for i, item in enumerate(_DEFAULT_RUBRIC_ITEMS, start=1):
+                con.execute("""
+                    INSERT INTO rubric_items
+                        (id, category, item_key, label, weight, description, position)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, [i, item["category"], item["item_key"], item["label"],
+                      item.get("weight"), item["description"], item["position"]])
+
         # Seed the default prompt if no prompts exist
         count = con.execute("SELECT COUNT(*) FROM prompts").fetchone()[0]
         if count == 0:
@@ -613,6 +650,64 @@ def count_test_cases() -> int:
     con = get_connection(read_only=True)
     try:
         return con.execute("SELECT COUNT(*) FROM test_cases").fetchone()[0]
+    finally:
+        con.close()
+
+
+# ── Rubrics ──────────────────────────────────────────────────────────────────
+
+def get_rubric(category: str) -> list[dict]:
+    """Return rubric items for a category ordered by position."""
+    con = get_connection(read_only=True)
+    try:
+        rows = con.execute(
+            "SELECT * FROM rubric_items WHERE category = ? ORDER BY position",
+            [category],
+        ).fetchdf()
+        return rows.to_dict("records")
+    finally:
+        con.close()
+
+
+def update_rubric_item(item_id: int, weight: Optional[float] = None,
+                       description: Optional[str] = None):
+    """Update weight and/or description for a single rubric item."""
+    updates: dict = {}
+    if weight is not None:
+        updates["weight"] = weight
+    if description is not None:
+        updates["description"] = description
+    if not updates:
+        return
+    updates["updated_at"] = datetime.now()
+    con = get_connection()
+    try:
+        set_clause = ", ".join(f"{k} = ?" for k in updates)
+        con.execute(
+            f"UPDATE rubric_items SET {set_clause} WHERE id = ?",
+            list(updates.values()) + [item_id],
+        )
+        con.commit()
+    finally:
+        con.close()
+
+
+def reset_rubric(category: str):
+    """Delete and re-seed rubric items for a category from the built-in defaults."""
+    items = [r for r in _DEFAULT_RUBRIC_ITEMS if r["category"] == category]
+    con = get_connection()
+    try:
+        con.execute("DELETE FROM rubric_items WHERE category = ?", [category])
+        # Re-use existing IDs range: fetch current max and start after
+        max_id = con.execute("SELECT COALESCE(MAX(id), 0) FROM rubric_items").fetchone()[0]
+        for offset, item in enumerate(items, start=1):
+            con.execute("""
+                INSERT INTO rubric_items
+                    (id, category, item_key, label, weight, description, position)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, [max_id + offset, item["category"], item["item_key"], item["label"],
+                  item.get("weight"), item["description"], item["position"]])
+        con.commit()
     finally:
         con.close()
 
