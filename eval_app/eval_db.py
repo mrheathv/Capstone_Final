@@ -493,6 +493,7 @@ def init_db():
                 id           INTEGER PRIMARY KEY,
                 run_name     VARCHAR NOT NULL,
                 model        VARCHAR NOT NULL,
+                judge_model  VARCHAR,
                 prompt_id    INTEGER,
                 prompt_name  VARCHAR,
                 started_at   TIMESTAMP DEFAULT current_timestamp,
@@ -502,6 +503,8 @@ def init_db():
                 failed       INTEGER DEFAULT 0
             )
         """)
+        # Back-fill column for databases created before judge_model was added
+        con.execute("ALTER TABLE eval_runs ADD COLUMN IF NOT EXISTS judge_model VARCHAR")
 
         con.execute("""
             CREATE TABLE IF NOT EXISTS eval_results (
@@ -795,14 +798,15 @@ def set_default_prompt(prompt_id: int):
 
 # ── Runs & Results ────────────────────────────────────────────────────────────
 
-def create_run(run_name: str, model: str, prompt_id: int, prompt_name: str) -> int:
+def create_run(run_name: str, model: str, prompt_id: int, prompt_name: str,
+               judge_model: str = None) -> int:
     con = get_connection()
     try:
         next_id = con.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM eval_runs").fetchone()[0]
         con.execute("""
-            INSERT INTO eval_runs (id, run_name, model, prompt_id, prompt_name)
-            VALUES (?, ?, ?, ?, ?)
-        """, [next_id, run_name, model, prompt_id, prompt_name])
+            INSERT INTO eval_runs (id, run_name, model, judge_model, prompt_id, prompt_name)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, [next_id, run_name, model, judge_model, prompt_id, prompt_name])
         con.commit()
         return next_id
     finally:
@@ -854,7 +858,7 @@ def get_runs() -> list[dict]:
     con = get_connection(read_only=True)
     try:
         df = con.execute("""
-            SELECT id, run_name, model, prompt_name, started_at, completed_at,
+            SELECT id, run_name, model, judge_model, prompt_name, started_at, completed_at,
                    total_cases, passed, failed
             FROM eval_runs
             ORDER BY id DESC

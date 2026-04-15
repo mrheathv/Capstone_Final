@@ -474,7 +474,8 @@ with tab_run:
                             "sql_prompt": prompt_row["sql_prompt"],
                         }
                         run_id = db.create_run(
-                            run_name_input, run_model, prompt_id, prompt_row["name"]
+                            run_name_input, run_model, prompt_id, prompt_row["name"],
+                            judge_model=run_judge_model,
                         )
                         passed_count = 0
                         failed_count = 0
@@ -555,11 +556,14 @@ with tab_results:
     if not runs:
         st.info("No evaluation runs yet. Go to the Run Evaluation tab to get started.")
     else:
-        run_options = {
-            f"[{r['id']}] {r['run_name']} — {r['model']} / {r['prompt_name']} "
-            f"({r['passed']}/{r['total_cases']} passed)": r["id"]
-            for r in runs
-        }
+        def _run_label(r: dict) -> str:
+            judge = r.get("judge_model") or "—"
+            return (
+                f"[{r['id']}] {r['run_name']} — {r['model']} / {r['prompt_name']} "
+                f"(judge: {judge})  ({r['passed']}/{r['total_cases']} passed)"
+            )
+
+        run_options = {_run_label(r): r["id"] for r in runs}
         selected_run_label = st.selectbox("Select Run", list(run_options.keys()))
         selected_run_id = run_options[selected_run_label]
         run_meta = next(r for r in runs if r["id"] == selected_run_id)
@@ -570,11 +574,12 @@ with tab_results:
         failed = run_meta["failed"] or 0
         pass_rate = (passed / total * 100) if total > 0 else 0
 
-        m1, m2, m3, m4 = st.columns(4)
+        m1, m2, m3, m4, m5 = st.columns(5)
         m1.metric("Total Tests", total)
         m2.metric("Passed", passed)
         m3.metric("Failed", failed)
         m4.metric("Pass Rate", f"{pass_rate:.1f}%")
+        m5.metric("Judge Model", run_meta.get("judge_model") or "—")
 
         st.divider()
 
@@ -654,10 +659,7 @@ with tab_compare:
     if len(runs) < 2:
         st.info("You need at least 2 completed evaluation runs to compare. Run the evaluation first.")
     else:
-        run_labels = {
-            f"[{r['id']}] {r['run_name']} — {r['model']} / {r['prompt_name']}": r["id"]
-            for r in runs
-        }
+        run_labels = {_run_label(r): r["id"] for r in runs}
         selected_labels = st.multiselect(
             "Select runs to compare (2–4)",
             list(run_labels.keys()),
@@ -679,10 +681,11 @@ with tab_compare:
                 total = run["total_cases"] or 0
                 passed = run["passed"] or 0
                 rate = (passed / total * 100) if total > 0 else 0
+                judge = run.get("judge_model") or "—"
                 col.metric(
-                    f"{run['prompt_name']}\n({run['model']})",
+                    f"{run['prompt_name']} / {run['model']}",
                     f"{rate:.1f}%",
-                    f"{passed}/{total} passed",
+                    f"{passed}/{total} passed  ·  judge: {judge}",
                 )
 
             st.divider()
