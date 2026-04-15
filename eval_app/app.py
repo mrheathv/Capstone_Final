@@ -17,7 +17,6 @@ import streamlit as st
 sys.path.insert(0, os.path.dirname(__file__))
 
 import eval_db as db
-import importer
 import evaluator
 
 db.init_db()
@@ -33,8 +32,17 @@ st.title("🧪 LLM Evaluation Suite")
 st.caption("Evaluate RAG chatbot quality across Conversational, SQL, and Performance dimensions.")
 
 AVAILABLE_MODELS = [
-    "gpt-4o-mini",
-    "gpt-4o",
+    # ── Latest flagship ────────────────────────────────────────────────────────
+    "gpt-4.1",           # Best instruction-following; top RAG accuracy
+    "gpt-4.1-mini",      # Fast & cost-efficient; strong RAG performance
+    "gpt-4.1-nano",      # Fastest / cheapest; good for high-volume eval runs
+    # ── GPT-4o family ─────────────────────────────────────────────────────────
+    "gpt-4o",            # Multimodal flagship; excellent context synthesis
+    "gpt-4o-mini",       # Popular balanced choice for RAG pipelines
+    # ── Reasoning models (good for complex multi-hop RAG) ─────────────────────
+    "o3-mini",           # Fast reasoning; strong at multi-step SQL + RAG
+    "o1-mini",           # Earlier reasoning model; solid for analytical queries
+    # ── Legacy ────────────────────────────────────────────────────────────────
     "gpt-4-turbo",
     "gpt-3.5-turbo",
 ]
@@ -66,24 +74,6 @@ with st.sidebar:
     selected_prompt = next(
         (p for p in prompts_list if p["name"] == selected_prompt_name), prompts_list[0]
     )
-
-    st.divider()
-    st.subheader("Import Test Cases")
-    st.caption("Loads from Capstone_Final.xlsx (skips if data already present).")
-    if st.button("Import from Excel", use_container_width=True):
-        if db.count_test_cases() > 0:
-            st.warning("Test cases already exist. Clear them first if you want a fresh import.")
-        else:
-            with st.spinner("Importing…"):
-                try:
-                    counts = importer.import_from_excel(db)
-                    st.success(
-                        f"Imported {counts['conversational']} conversational, "
-                        f"{counts['sql']} SQL, {counts['performance']} performance tests."
-                    )
-                    st.rerun()
-                except Exception as exc:
-                    st.error(f"Import failed: {exc}")
 
     st.divider()
     tc_count = db.count_test_cases()
@@ -139,7 +129,7 @@ with tab_tests:
                                 st.rerun()
 
             if not cases:
-                st.info("No test cases yet. Use the Import button in the sidebar or add one above.")
+                st.info("No test cases yet. Add one using the form above.")
                 return
 
             # ── Editable table ─────────────────────────────────────────────────
@@ -333,7 +323,7 @@ with tab_run:
                     run_queue += [("performance", tc) for tc in db.get_test_cases("performance")]
 
                 if not run_queue:
-                    st.warning("No test cases found. Import from Excel first.")
+                    st.warning("No test cases found. Add test cases in the Test Cases tab.")
                 else:
                     total_work = len(run_queue) * len(selected_prompt_ids)
                     progress_bar = st.progress(0)
