@@ -5,12 +5,18 @@ Uses eval.duckdb, completely separate from the sales.duckdb app database.
 
 import duckdb
 import os
+import re
 import json
 from datetime import datetime
 from typing import Optional
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "eval.duckdb")
-PROMPTS_CONFIG_PATH = os.path.join(os.path.dirname(__file__), "prompts_config.json")
+PROMPTS_EXCEL_PATH = os.path.join(os.path.dirname(__file__), "..",
+    "Reference Files", "rag_salesbot-main", "Capstone Prompts Final.xlsx")
+TEST_CASES_EXCEL_PATH = os.path.join(os.path.dirname(__file__), "..",
+    "Reference Files", "rag_salesbot-main", "Capstone_Final.xlsx")
+
+_seeded_from_excel = False  # set True after first init_db() call per server lifetime
 
 # ── Rubric seed data (sourced from Capstone_Final.xlsx rubric sheets) ─────────
 # item_key values for conversational map directly to eval_results DB columns.
@@ -452,47 +458,103 @@ SEED_TEST_CASES = [
 ]
 
 
-def _load_prompts_from_json() -> list[dict]:
-    """Return prompts from prompts_config.json, or [] if absent/invalid."""
-    if not os.path.exists(PROMPTS_CONFIG_PATH):
-        return []
+def _extract_perf_json(text: str) -> dict:
+    """Extract the first JSON object from a Performance sheet cell."""
+    if not text:
+        return {}
+    start, end = text.find("{"), text.rfind("}")
+    if start == -1 or end == -1:
+        return {}
+    json_str = re.sub(r",([A-Z]+\d+)\b", "", text[start:end + 1])
     try:
-        with open(PROMPTS_CONFIG_PATH, "r", encoding="utf-8") as fh:
-            payload = json.load(fh)
-        valid = []
-        for p in payload.get("prompts", []):
-            if not all(k in p for k in ("id", "name", "system_prompt", "sql_prompt")):
-                continue
-            valid.append(p)
-        return valid
-    except Exception:
-        return []
+        return json.loads(json_str)
+    except json.JSONDecodeError:
+        return {}
 
 
-def _sync_prompts_to_json() -> None:
-    """Atomically write all current prompts to prompts_config.json."""
-    try:
-        rows = get_prompts()
-        payload = {
-            "version": 1,
-            "prompts": [
-                {
-                    "id": int(r["id"]),
-                    "name": r["name"],
-                    "description": r.get("description") or "",
-                    "system_prompt": r["system_prompt"],
-                    "sql_prompt": r["sql_prompt"],
-                    "is_default": bool(r.get("is_default", False)),
-                }
-                for r in rows
-            ],
-        }
-        tmp_path = PROMPTS_CONFIG_PATH + ".tmp"
-        with open(tmp_path, "w", encoding="utf-8") as fh:
-            json.dump(payload, fh, indent=2, ensure_ascii=False)
-        os.replace(tmp_path, PROMPTS_CONFIG_PATH)
-    except Exception:
-        pass
+def _seed_prompts(con) -> None:
+    """Wipe and re-seed the prompts table from Capstone Prompts Final.xlsx."""
+    if not os.path.exists(PROMPTS_EXCEL_PATH):
+        con.execute("""
+            INSERT INTO prompts (id, name, description, system_prompt, sql_prompt, is_default)
+            VALUES (1, 'Default Prompt', 'Original system prompt from the reference chatbot',
+                    ?, ?, TRUE)
+        """, [DEFAULT_SYSTEM_PROMPT, DEFAULT_SQL_PROMPT])
+        return
+
+    import openpyxl
+    wb = openpyxl.load_workbook(PROMPTS_EXCEL_PATH)
+    ws = wb.active
+    prompt_id = 1
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        name, description, system_prompt, sql_prompt, *_ = list(row) + [None] * 4
+        if not name or not system_prompt or not sql_prompt:
+            continue
+        con.execute("""
+            INSERT INTO prompts (id, name, description, system_prompt, sql_prompt, is_default)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, [prompt_id, str(name).strip(), str(description).strip() if description else "",
+              str(system_prompt).strip(), str(sql_prompt).strip(), prompt_id == 1])
+        prompt_id += 1
+
+
+def _seed_test_cases(con) -> None:
+    """Wipe and re-seed the test_cases table from Capstone_Final.xlsx."""
+    if not os.path.exists(TEST_CASES_EXCEL_PATH):
+        for i, tc in enumerate(SEED_TEST_CASES, start=1):
+            con.execute("""
+                INSERT INTO test_cases
+                    (id, category, question, golden_sql, expected_rows, time_threshold_ms)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, [i, tc["category"], tc["question"], tc.get("golden_sql"),
+                  tc.get("expected_rows"), tc.get("time_threshold_ms")])
+        return
+
+    import openpyxl
+    wb = openpyxl.load_workbook(TEST_CASES_EXCEL_PATH)
+    tc_id = 1
+
+    for row in wb["Conversational"].iter_rows(min_row=2, values_only=True):
+        q_no, question, q_type, eval_purpose, expected_output, *_ = list(row) + [None] * 8
+        if not question:
+            continue
+        con.execute("""
+            INSERT INTO test_cases (id, category, question, expected_output)
+            VALUES (?, 'conversational', ?, ?)
+        """, [tc_id, str(question).strip(),
+              str(expected_output).strip() if expected_output else None])
+        tc_id += 1
+
+    for row in wb["SQL"].iter_rows(min_row=2, values_only=True):
+        question, golden_sql, *_ = list(row) + [None] * 4
+        if not question:
+            continue
+        con.execute("""
+            INSERT INTO test_cases (id, category, question, golden_sql)
+            VALUES (?, 'sql', ?, ?)
+        """, [tc_id, str(question).strip(),
+              str(golden_sql).strip() if golden_sql else None])
+        tc_id += 1
+
+    for row in wb["Performance"].iter_rows(min_row=2, values_only=True):
+        question, output_text, *_ = list(row) + [None] * 4
+        if not question:
+            continue
+        metrics = _extract_perf_json(str(output_text) if output_text else "")
+        rows_returned = None
+        time_threshold_ms = 10000.0
+        if metrics:
+            rows_returned = metrics.get("execution", {}).get("rows_returned")
+            total_ms = metrics.get("generation", {}).get("total_ms")
+            if total_ms:
+                time_threshold_ms = max(float(total_ms) * 2, 5000.0)
+        con.execute("""
+            INSERT INTO test_cases (id, category, question, expected_rows, time_threshold_ms)
+            VALUES (?, 'performance', ?, ?, ?)
+        """, [tc_id, str(question).strip(),
+              int(rows_returned) if rows_returned is not None else None,
+              time_threshold_ms])
+        tc_id += 1
 
 
 def get_connection(read_only: bool = False):
@@ -502,7 +564,8 @@ def get_connection(read_only: bool = False):
 
 
 def init_db():
-    """Create all tables if they don't exist and seed default prompt."""
+    """Create all tables if they don't exist and seed from Excel files."""
+    global _seeded_from_excel
     con = get_connection()
     try:
         con.execute("""
@@ -600,50 +663,17 @@ def init_db():
                 """, [i, item["category"], item["item_key"], item["label"],
                       item.get("weight"), item["description"], item["position"]])
 
-        # Seed prompts if none exist — prefer prompts_config.json over hardcoded default
-        count = con.execute("SELECT COUNT(*) FROM prompts").fetchone()[0]
-        if count == 0:
-            loaded = _load_prompts_from_json()
-            if loaded:
-                for p in loaded:
-                    con.execute("""
-                        INSERT INTO prompts (id, name, description, system_prompt, sql_prompt, is_default)
-                        VALUES (?, ?, ?, ?, ?, ?)
-                    """, [p["id"], p["name"], p.get("description", ""),
-                          p["system_prompt"], p["sql_prompt"], p.get("is_default", False)])
-                if not con.execute(
-                    "SELECT COUNT(*) FROM prompts WHERE is_default = TRUE"
-                ).fetchone()[0]:
-                    first_id = con.execute("SELECT MIN(id) FROM prompts").fetchone()[0]
-                    con.execute("UPDATE prompts SET is_default = TRUE WHERE id = ?", [first_id])
-            else:
-                con.execute("""
-                    INSERT INTO prompts (id, name, description, system_prompt, sql_prompt, is_default)
-                    VALUES (1, 'Default Prompt', 'Original system prompt from the reference chatbot',
-                            ?, ?, TRUE)
-                """, [DEFAULT_SYSTEM_PROMPT, DEFAULT_SQL_PROMPT])
-
-        # Seed test cases if none exist yet
-        tc_count = con.execute("SELECT COUNT(*) FROM test_cases").fetchone()[0]
-        if tc_count == 0:
-            for i, tc in enumerate(SEED_TEST_CASES, start=1):
-                con.execute("""
-                    INSERT INTO test_cases
-                        (id, category, question, golden_sql, expected_rows, time_threshold_ms)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """, [
-                    i,
-                    tc["category"],
-                    tc["question"],
-                    tc.get("golden_sql"),
-                    tc.get("expected_rows"),
-                    tc.get("time_threshold_ms"),
-                ])
+        # Re-seed prompts and test cases from Excel on every server startup
+        if not _seeded_from_excel:
+            con.execute("DELETE FROM prompts")
+            con.execute("DELETE FROM test_cases")
+            _seed_prompts(con)
+            _seed_test_cases(con)
 
         con.commit()
     finally:
         con.close()
-    _sync_prompts_to_json()
+    _seeded_from_excel = True
 
 
 # ── Test Cases ────────────────────────────────────────────────────────────────
@@ -808,7 +838,6 @@ def add_prompt(name: str, description: str, system_prompt: str, sql_prompt: str)
         con.commit()
     finally:
         con.close()
-    _sync_prompts_to_json()
     return next_id
 
 
@@ -824,7 +853,6 @@ def update_prompt(prompt_id: int, name: str, description: str,
         con.commit()
     finally:
         con.close()
-    _sync_prompts_to_json()
 
 
 def delete_prompt(prompt_id: int):
@@ -845,7 +873,6 @@ def delete_prompt(prompt_id: int):
         con.commit()
     finally:
         con.close()
-    _sync_prompts_to_json()
 
 
 def set_default_prompt(prompt_id: int):
@@ -856,7 +883,6 @@ def set_default_prompt(prompt_id: int):
         con.commit()
     finally:
         con.close()
-    _sync_prompts_to_json()
 
 
 # ── Runs & Results ────────────────────────────────────────────────────────────
