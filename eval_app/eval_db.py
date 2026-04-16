@@ -526,14 +526,15 @@ def _seed_test_cases(con) -> None:
         tc_id += 1
 
     for row in wb["SQL"].iter_rows(min_row=2, values_only=True):
-        question, golden_sql, *_ = list(row) + [None] * 4
+        question, golden_sql, expected_rows, *_ = list(row) + [None] * 4
         if not question:
             continue
         con.execute("""
-            INSERT INTO test_cases (id, category, question, golden_sql)
-            VALUES (?, 'sql', ?, ?)
+            INSERT INTO test_cases (id, category, question, golden_sql, expected_rows)
+            VALUES (?, 'sql', ?, ?, ?)
         """, [tc_id, str(question).strip(),
-              str(golden_sql).strip() if golden_sql else None])
+              str(golden_sql).strip() if golden_sql else None,
+              int(expected_rows) if expected_rows is not None else None])
         tc_id += 1
 
     for row in wb["Performance"].iter_rows(min_row=2, values_only=True):
