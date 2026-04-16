@@ -10,6 +10,7 @@ from datetime import datetime
 from typing import Optional
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "eval.duckdb")
+PROMPTS_CONFIG_PATH = os.path.join(os.path.dirname(__file__), "prompts_config.json")
 
 # ── Rubric seed data (sourced from Capstone_Final.xlsx rubric sheets) ─────────
 # item_key values for conversational map directly to eval_results DB columns.
@@ -451,6 +452,49 @@ SEED_TEST_CASES = [
 ]
 
 
+def _load_prompts_from_json() -> list[dict]:
+    """Return prompts from prompts_config.json, or [] if absent/invalid."""
+    if not os.path.exists(PROMPTS_CONFIG_PATH):
+        return []
+    try:
+        with open(PROMPTS_CONFIG_PATH, "r", encoding="utf-8") as fh:
+            payload = json.load(fh)
+        valid = []
+        for p in payload.get("prompts", []):
+            if not all(k in p for k in ("id", "name", "system_prompt", "sql_prompt")):
+                continue
+            valid.append(p)
+        return valid
+    except Exception:
+        return []
+
+
+def _sync_prompts_to_json() -> None:
+    """Atomically write all current prompts to prompts_config.json."""
+    try:
+        rows = get_prompts()
+        payload = {
+            "version": 1,
+            "prompts": [
+                {
+                    "id": int(r["id"]),
+                    "name": r["name"],
+                    "description": r.get("description") or "",
+                    "system_prompt": r["system_prompt"],
+                    "sql_prompt": r["sql_prompt"],
+                    "is_default": bool(r.get("is_default", False)),
+                }
+                for r in rows
+            ],
+        }
+        tmp_path = PROMPTS_CONFIG_PATH + ".tmp"
+        with open(tmp_path, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, indent=2, ensure_ascii=False)
+        os.replace(tmp_path, PROMPTS_CONFIG_PATH)
+    except Exception:
+        pass
+
+
 def get_connection(read_only: bool = False):
     # Always open read-write; DuckDB raises ConnectionException if you mix
     # read_only=True and read_only=False connections to the same file.
@@ -556,14 +600,28 @@ def init_db():
                 """, [i, item["category"], item["item_key"], item["label"],
                       item.get("weight"), item["description"], item["position"]])
 
-        # Seed the default prompt if no prompts exist
+        # Seed prompts if none exist — prefer prompts_config.json over hardcoded default
         count = con.execute("SELECT COUNT(*) FROM prompts").fetchone()[0]
         if count == 0:
-            con.execute("""
-                INSERT INTO prompts (id, name, description, system_prompt, sql_prompt, is_default)
-                VALUES (1, 'Default Prompt', 'Original system prompt from the reference chatbot',
-                        ?, ?, TRUE)
-            """, [DEFAULT_SYSTEM_PROMPT, DEFAULT_SQL_PROMPT])
+            loaded = _load_prompts_from_json()
+            if loaded:
+                for p in loaded:
+                    con.execute("""
+                        INSERT INTO prompts (id, name, description, system_prompt, sql_prompt, is_default)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                    """, [p["id"], p["name"], p.get("description", ""),
+                          p["system_prompt"], p["sql_prompt"], p.get("is_default", False)])
+                if not con.execute(
+                    "SELECT COUNT(*) FROM prompts WHERE is_default = TRUE"
+                ).fetchone()[0]:
+                    first_id = con.execute("SELECT MIN(id) FROM prompts").fetchone()[0]
+                    con.execute("UPDATE prompts SET is_default = TRUE WHERE id = ?", [first_id])
+            else:
+                con.execute("""
+                    INSERT INTO prompts (id, name, description, system_prompt, sql_prompt, is_default)
+                    VALUES (1, 'Default Prompt', 'Original system prompt from the reference chatbot',
+                            ?, ?, TRUE)
+                """, [DEFAULT_SYSTEM_PROMPT, DEFAULT_SQL_PROMPT])
 
         # Seed test cases if none exist yet
         tc_count = con.execute("SELECT COUNT(*) FROM test_cases").fetchone()[0]
@@ -585,6 +643,7 @@ def init_db():
         con.commit()
     finally:
         con.close()
+    _sync_prompts_to_json()
 
 
 # ── Test Cases ────────────────────────────────────────────────────────────────
@@ -747,9 +806,10 @@ def add_prompt(name: str, description: str, system_prompt: str, sql_prompt: str)
             VALUES (?, ?, ?, ?, ?, FALSE)
         """, [next_id, name, description, system_prompt, sql_prompt])
         con.commit()
-        return next_id
     finally:
         con.close()
+    _sync_prompts_to_json()
+    return next_id
 
 
 def update_prompt(prompt_id: int, name: str, description: str,
@@ -764,6 +824,7 @@ def update_prompt(prompt_id: int, name: str, description: str,
         con.commit()
     finally:
         con.close()
+    _sync_prompts_to_json()
 
 
 def delete_prompt(prompt_id: int):
@@ -784,6 +845,7 @@ def delete_prompt(prompt_id: int):
         con.commit()
     finally:
         con.close()
+    _sync_prompts_to_json()
 
 
 def set_default_prompt(prompt_id: int):
@@ -794,6 +856,7 @@ def set_default_prompt(prompt_id: int):
         con.commit()
     finally:
         con.close()
+    _sync_prompts_to_json()
 
 
 # ── Runs & Results ────────────────────────────────────────────────────────────
