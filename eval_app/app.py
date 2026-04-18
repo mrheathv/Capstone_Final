@@ -33,15 +33,16 @@ st.caption("Evaluate RAG chatbot quality across Conversational, SQL, and Perform
 
 AVAILABLE_MODELS = [
     # ── OpenAI ────────────────────────────────────────────────────────────────
-    "gpt-4.1",            # Latest flagship; best instruction-following for RAG
+    "gpt-5.4",            # Latest flagship; highest capability for RAG
+    "gpt-5.4-pro",        # Extended compute; best for complex reasoning + RAG
+    "gpt-5.4-mini",       # Balanced speed/cost; strong RAG performance
+    "gpt-5.4-nano",       # Fastest/cheapest; good for high-volume eval runs
+    "gpt-4.1",            # Previous flagship; best instruction-following for RAG
     "gpt-4.1-mini",       # Fast & cost-efficient; strong RAG performance
-    "gpt-4.1-nano",       # Fastest/cheapest; good for high-volume eval runs
+    "gpt-4.1-nano",       # Fast/cheap; good for high-volume eval runs
     "gpt-4o",             # Multimodal flagship; excellent context synthesis
     "gpt-4o-mini",        # Popular balanced choice for RAG pipelines
     "o3-mini",            # Reasoning model; strong at multi-step SQL + RAG
-    "o1-mini",            # Reasoning model; solid for analytical queries
-    "gpt-4-turbo",
-    "gpt-3.5-turbo",
     # ── Anthropic (requires ANTHROPIC_API_KEY) ────────────────────────────────
     "claude-3-5-sonnet-20241022",   # Excellent reasoning + instruction following
     "claude-3-5-haiku-20241022",    # Fast & efficient; great RAG retrieval
