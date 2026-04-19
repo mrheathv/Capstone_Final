@@ -611,6 +611,7 @@ def init_db():
         """)
         # Back-fill column for databases created before judge_model was added
         con.execute("ALTER TABLE eval_runs ADD COLUMN IF NOT EXISTS judge_model VARCHAR")
+        con.execute("ALTER TABLE eval_results ADD COLUMN IF NOT EXISTS judge_reasoning VARCHAR")
 
         con.execute("""
             CREATE TABLE IF NOT EXISTS eval_results (
@@ -629,6 +630,7 @@ def init_db():
                 completeness    DOUBLE,
                 actionability   DOUBLE,
                 safety          DOUBLE,
+                judge_reasoning VARCHAR,
                 llm_latency_ms  DOUBLE,
                 execution_ms    DOUBLE,
                 total_time_ms   DOUBLE,
@@ -926,14 +928,16 @@ def save_result(run_id: int, test_case_id: Optional[int], category: str,
                 id, run_id, test_case_id, category, question,
                 llm_response, generated_sql, passed, score, error_message,
                 relevance, accuracy, completeness, actionability, safety,
+                judge_reasoning,
                 llm_latency_ms, execution_ms, total_time_ms, tokens_used, rows_returned
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, [
             next_id, run_id, test_case_id, category, question,
             result.get("llm_response"), result.get("generated_sql"),
             result.get("passed"), result.get("score"), result.get("error_message"),
             result.get("relevance"), result.get("accuracy"),
             result.get("completeness"), result.get("actionability"), result.get("safety"),
+            result.get("judge_reasoning"),
             result.get("llm_latency_ms"), result.get("execution_ms"),
             result.get("total_time_ms"), result.get("tokens_used"), result.get("rows_returned"),
         ])
