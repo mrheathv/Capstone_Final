@@ -12,6 +12,7 @@ All providers require the appropriate API key set as an environment variable.
 
 import json
 import os
+import time
 
 from openai import OpenAI
 
@@ -62,6 +63,8 @@ def get_anthropic_client():
 
 # ── Unified text completion ───────────────────────────────────────────────────
 
+_RETRY_DELAYS = [5, 15, 30, 60]  # seconds between attempts on 429
+
 def text_complete(
     model: str,
     messages: list[dict],
@@ -73,7 +76,29 @@ def text_complete(
 
     Works across all supported providers. When json_mode=True the response
     is requested as strict JSON (falls back to text parsing for Anthropic).
+    Retries up to 4 times with backoff on rate-limit (429) errors.
     """
+    last_exc: Exception | None = None
+    for attempt, delay in enumerate([0] + _RETRY_DELAYS):
+        if delay:
+            time.sleep(delay)
+        try:
+            return _text_complete_once(model, messages, temperature, json_mode)
+        except Exception as exc:
+            msg = str(exc)
+            if "429" in msg or "rate_limit" in msg.lower():
+                last_exc = exc
+                continue
+            raise
+    raise last_exc  # type: ignore[misc]
+
+
+def _text_complete_once(
+    model: str,
+    messages: list[dict],
+    temperature: float,
+    json_mode: bool,
+) -> tuple[str, int]:
     provider = get_provider(model)
 
     if provider == "anthropic":
