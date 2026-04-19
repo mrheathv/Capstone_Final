@@ -611,7 +611,6 @@ def init_db():
         """)
         # Back-fill column for databases created before judge_model was added
         con.execute("ALTER TABLE eval_runs ADD COLUMN IF NOT EXISTS judge_model VARCHAR")
-        con.execute("ALTER TABLE eval_results ADD COLUMN IF NOT EXISTS judge_reasoning VARCHAR")
 
         con.execute("""
             CREATE TABLE IF NOT EXISTS eval_results (
@@ -639,6 +638,8 @@ def init_db():
                 created_at      TIMESTAMP DEFAULT current_timestamp
             )
         """)
+        # Back-fill column for databases created before judge_reasoning was added
+        con.execute("ALTER TABLE eval_results ADD COLUMN IF NOT EXISTS judge_reasoning VARCHAR")
 
         con.execute("""
             CREATE TABLE IF NOT EXISTS rubric_items (
