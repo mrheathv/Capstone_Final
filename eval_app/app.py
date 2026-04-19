@@ -44,6 +44,9 @@ AVAILABLE_MODELS = [
     "gpt-4o-mini",        # Popular balanced choice for RAG pipelines
     "o3-mini",            # Reasoning model; strong at multi-step SQL + RAG
     # ── Anthropic (requires ANTHROPIC_API_KEY) ────────────────────────────────
+    "claude-opus-4-7",              # Most capable Claude; strongest reasoning + RAG
+    "claude-sonnet-4-6",            # Balanced flagship; excellent instruction following
+    "claude-haiku-4-5-20251001",    # Fast & cheap; great for high-volume eval runs
     "claude-3-5-sonnet-20241022",   # Excellent reasoning + instruction following
     "claude-3-5-haiku-20241022",    # Fast & efficient; great RAG retrieval
     "claude-3-opus-20240229",       # Most capable Claude 3; strong for complex RAG
