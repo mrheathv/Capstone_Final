@@ -643,6 +643,10 @@ with tab_results:
                             sc4.metric("Actionability (10%)", r["actionability"])
                             sc5.metric("Safety (15%)", r["safety"])
 
+                            if r.get("judge_reasoning"):
+                                st.markdown("**Judge Reasoning**")
+                                st.info(r["judge_reasoning"])
+
                         # Performance metrics
                         if r.get("total_time_ms") is not None:
                             st.markdown("**Performance Metrics**")
@@ -650,6 +654,21 @@ with tab_results:
                             pm1.metric("LLM Latency", f"{r.get('llm_latency_ms', 0):.0f} ms")
                             pm2.metric("Total Time", f"{r.get('total_time_ms', 0):.0f} ms")
                             pm3.metric("Rows Returned", r.get("rows_returned") or "—")
+
+            st.divider()
+            csv_cols = [
+                "category", "question", "passed", "score",
+                "relevance", "accuracy", "completeness", "actionability", "safety",
+                "judge_reasoning", "llm_response", "generated_sql",
+                "error_message", "llm_latency_ms", "total_time_ms", "tokens_used",
+            ]
+            df_export = pd.DataFrame(filtered)[[c for c in csv_cols if c in pd.DataFrame(filtered).columns]]
+            st.download_button(
+                "⬇️ Download Results as CSV",
+                data=df_export.to_csv(index=False),
+                file_name=f"eval_results_run_{selected_run_id}.csv",
+                mime="text/csv",
+            )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
