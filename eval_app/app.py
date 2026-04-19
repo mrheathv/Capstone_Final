@@ -610,6 +610,25 @@ with tab_results:
                 )
             ]
 
+            if filtered:
+                _export_cols = [
+                    "id", "category", "question", "passed", "score",
+                    "relevance", "accuracy", "completeness", "actionability", "safety",
+                    "generated_sql", "llm_response",
+                    "llm_latency_ms", "execution_ms", "total_time_ms", "tokens_used",
+                    "rows_returned", "error_message",
+                ]
+                df_exp = pd.DataFrame(filtered)
+                avail_cols = [c for c in _export_cols if c in df_exp.columns]
+                csv_data = df_exp[avail_cols].to_csv(index=False).encode("utf-8")
+                run_slug = run_meta["run_name"].replace(" ", "_")[:40]
+                st.download_button(
+                    label="⬇️ Export to CSV",
+                    data=csv_data,
+                    file_name=f"eval_run_{selected_run_id}_{run_slug}.csv",
+                    mime="text/csv",
+                )
+
             for r in filtered:
                 icon = "✅" if r.get("passed") else "❌"
                 score_str = f"  Score: {r['score']:.2f}" if r.get("score") is not None else ""
@@ -746,6 +765,13 @@ with tab_compare:
                     differ_count = df_cmp["Differs?"].str.contains("⚠️").sum()
                     st.caption(
                         f"{differ_count} question(s) have different pass/fail outcomes across runs."
+                    )
+                    csv_cmp = df_cmp.to_csv(index=False).encode("utf-8")
+                    st.download_button(
+                        label="⬇️ Export comparison to CSV",
+                        data=csv_cmp,
+                        file_name=f"eval_compare_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                        mime="text/csv",
                     )
                 else:
                     st.info("No matching results for the selected filters.")
