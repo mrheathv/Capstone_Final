@@ -638,10 +638,12 @@ with tab_results:
                 avail_cols = [c for c in _export_cols if c in df_exp.columns]
                 csv_data = df_exp[avail_cols].to_csv(index=False).encode("utf-8")
                 run_slug = run_meta["run_name"].replace(" ", "_")[:40]
+                model_slug = run_meta["model"].replace("/", "-").replace(" ", "_")
+                judge_slug = (run_meta.get("judge_model") or "nojudge").replace("/", "-").replace(" ", "_")
                 st.download_button(
                     label="⬇️ Export to CSV",
                     data=csv_data,
-                    file_name=f"eval_run_{selected_run_id}_{run_slug}.csv",
+                    file_name=f"eval_run_{selected_run_id}_{run_slug}_{model_slug}_judge-{judge_slug}.csv",
                     mime="text/csv",
                 )
 
@@ -703,7 +705,7 @@ with tab_results:
             st.download_button(
                 "⬇️ Download Results as CSV",
                 data=df_export.to_csv(index=False),
-                file_name=f"eval_results_run_{selected_run_id}.csv",
+                file_name=f"eval_results_run_{selected_run_id}_{model_slug}_judge-{judge_slug}.csv",
                 mime="text/csv",
             )
 
