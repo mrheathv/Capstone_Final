@@ -8,6 +8,7 @@ Run with:
 
 import os
 import sys
+import time
 import pandas as pd
 from datetime import datetime
 
@@ -526,6 +527,8 @@ with tab_run:
                                 passed_count += 1
                             else:
                                 failed_count += 1
+
+                            time.sleep(60)
 
                             summary_rows.append({
                                 "Prompt": prompt_row["name"],
