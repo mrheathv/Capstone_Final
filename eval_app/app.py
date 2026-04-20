@@ -693,10 +693,11 @@ with tab_results:
 
             st.divider()
             csv_cols = [
-                "category", "question", "passed", "score",
+                "id", "category", "question", "passed", "score",
                 "relevance", "accuracy", "completeness", "actionability", "safety",
-                "judge_reasoning", "llm_response", "generated_sql",
-                "error_message", "llm_latency_ms", "total_time_ms", "tokens_used",
+                "judge_reasoning", "generated_sql", "llm_response",
+                "llm_latency_ms", "execution_ms", "total_time_ms", "tokens_used",
+                "rows_returned", "error_message",
             ]
             df_export = pd.DataFrame(filtered)[[c for c in csv_cols if c in pd.DataFrame(filtered).columns]]
             st.download_button(
