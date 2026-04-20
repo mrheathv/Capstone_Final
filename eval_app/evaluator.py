@@ -242,7 +242,7 @@ def _dispatch_tool(tool_name: str, tool_args: dict, model: str,
 
 def _run_agent_openai_compat(question: str, system_prompt: str, model: str,
                               sql_prompt_template: str,
-                              max_iterations: int = 5) -> tuple[str, float]:
+                              max_iterations: int = 5) -> tuple[str, float, int]:
     """ReAct agent loop for OpenAI-compatible providers (OpenAI, Deepseek, Gemini)."""
     client = llm_client.get_openai_compat_client(model)
     messages = [
@@ -250,6 +250,7 @@ def _run_agent_openai_compat(question: str, system_prompt: str, model: str,
         {"role": "user", "content": question},
     ]
     total_latency_ms = 0.0
+    total_tokens = 0
 
     for _ in range(max_iterations):
         t0 = time.perf_counter()
@@ -260,10 +261,11 @@ def _run_agent_openai_compat(question: str, system_prompt: str, model: str,
             tool_choice="auto",
         )
         total_latency_ms += (time.perf_counter() - t0) * 1000
+        total_tokens += resp.usage.total_tokens if resp.usage else 0
 
         msg = resp.choices[0].message
         if not msg.tool_calls:
-            return msg.content or "No answer generated.", total_latency_ms
+            return msg.content or "No answer generated.", total_latency_ms, total_tokens
 
         messages.append(msg)
 
@@ -279,18 +281,19 @@ def _run_agent_openai_compat(question: str, system_prompt: str, model: str,
                 "content": result,
             })
 
-    return "Processing limit reached without a final answer.", total_latency_ms
+    return "Processing limit reached without a final answer.", total_latency_ms, total_tokens
 
 
 def _run_agent_anthropic(question: str, system_prompt: str, model: str,
                          sql_prompt_template: str,
-                         max_iterations: int = 5) -> tuple[str, float]:
+                         max_iterations: int = 5) -> tuple[str, float, int]:
     """ReAct agent loop for Anthropic Claude models."""
     client = llm_client.get_anthropic_client()
     anthropic_tools = llm_client.openai_tools_to_anthropic(_TOOLS_SPEC)
 
     messages: list[dict] = [{"role": "user", "content": question}]
     total_latency_ms = 0.0
+    total_tokens = 0
 
     for _ in range(max_iterations):
         t0 = time.perf_counter()
@@ -302,13 +305,14 @@ def _run_agent_anthropic(question: str, system_prompt: str, model: str,
             tools=anthropic_tools,
         )
         total_latency_ms += (time.perf_counter() - t0) * 1000
+        total_tokens += (resp.usage.input_tokens + resp.usage.output_tokens) if resp.usage else 0
 
         # End turn — extract text answer
         if resp.stop_reason == "end_turn":
             for block in resp.content:
                 if hasattr(block, "text"):
-                    return block.text, total_latency_ms
-            return "No answer generated.", total_latency_ms
+                    return block.text, total_latency_ms, total_tokens
+            return "No answer generated.", total_latency_ms, total_tokens
 
         # Serialize assistant message and collect tool results
         messages.append({
@@ -331,11 +335,11 @@ def _run_agent_anthropic(question: str, system_prompt: str, model: str,
         if tool_results:
             messages.append({"role": "user", "content": tool_results})
 
-    return "Processing limit reached without a final answer.", total_latency_ms
+    return "Processing limit reached without a final answer.", total_latency_ms, total_tokens
 
 
 def _run_agent(question: str, system_prompt: str, model: str,
-               sql_prompt_template: str, max_iterations: int = 5) -> tuple[str, float]:
+               sql_prompt_template: str, max_iterations: int = 5) -> tuple[str, float, int]:
     """Dispatch to the correct agent loop based on provider."""
     if get_provider(model) == "anthropic":
         return _run_agent_anthropic(
@@ -430,7 +434,7 @@ def run_conversational_test(question: str, model: str, prompt: dict,
     sql_prompt = prompt.get("sql_prompt", "")
 
     t_start = time.perf_counter()
-    answer, llm_latency_ms = _run_agent(question, system_prompt, model, sql_prompt)
+    answer, llm_latency_ms, tokens = _run_agent(question, system_prompt, model, sql_prompt)
     total_time_ms = (time.perf_counter() - t_start) * 1000
 
     rubric = _db.get_rubric("conversational")
@@ -453,7 +457,7 @@ def run_conversational_test(question: str, model: str, prompt: dict,
         "llm_latency_ms": llm_latency_ms,
         "execution_ms": None,
         "total_time_ms": total_time_ms,
-        "tokens_used": None,
+        "tokens_used": tokens,
         "rows_returned": None,
     }
 

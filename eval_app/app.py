@@ -630,7 +630,7 @@ with tab_results:
                 _export_cols = [
                     "id", "category", "question", "passed", "score",
                     "relevance", "accuracy", "completeness", "actionability", "safety",
-                    "generated_sql", "llm_response",
+                    "judge_reasoning", "generated_sql", "llm_response",
                     "llm_latency_ms", "execution_ms", "total_time_ms", "tokens_used",
                     "rows_returned", "error_message",
                 ]
@@ -693,10 +693,11 @@ with tab_results:
 
             st.divider()
             csv_cols = [
-                "category", "question", "passed", "score",
+                "id", "category", "question", "passed", "score",
                 "relevance", "accuracy", "completeness", "actionability", "safety",
-                "judge_reasoning", "llm_response", "generated_sql",
-                "error_message", "llm_latency_ms", "total_time_ms", "tokens_used",
+                "judge_reasoning", "generated_sql", "llm_response",
+                "llm_latency_ms", "execution_ms", "total_time_ms", "tokens_used",
+                "rows_returned", "error_message",
             ]
             df_export = pd.DataFrame(filtered)[[c for c in csv_cols if c in pd.DataFrame(filtered).columns]]
             st.download_button(
@@ -712,7 +713,7 @@ with tab_results:
 # ══════════════════════════════════════════════════════════════════════════════
 with tab_compare:
     st.header("Compare Runs")
-    st.caption("Select 2–4 evaluation runs to compare pass rates and per-question scores side-by-side.")
+    st.caption("Select 2–6 evaluation runs to compare pass rates and per-question scores side-by-side.")
 
     runs = db.get_runs()
     if len(runs) < 2:
@@ -720,15 +721,15 @@ with tab_compare:
     else:
         run_labels = {_run_label(r): r["id"] for r in runs}
         selected_labels = st.multiselect(
-            "Select runs to compare (2–4)",
+            "Select runs to compare (2–6)",
             list(run_labels.keys()),
             default=list(run_labels.keys())[:min(2, len(run_labels))],
         )
 
         if len(selected_labels) < 2:
             st.warning("Select at least 2 runs.")
-        elif len(selected_labels) > 4:
-            st.warning("Select at most 4 runs.")
+        elif len(selected_labels) > 6:
+            st.warning("Select at most 6 runs.")
         else:
             selected_ids = [run_labels[lbl] for lbl in selected_labels]
             selected_runs = [r for r in runs if r["id"] in selected_ids]
