@@ -444,8 +444,8 @@ with tab_run:
         )
         request_delay = st.selectbox(
             "Delay between requests (seconds)",
-            [20, 30, 60],
-            index=2,
+            [5, 20, 30, 60],
+            index=3,
             help="Pause between test cases to avoid provider rate limits (TPM)",
         )
 
