@@ -630,7 +630,7 @@ with tab_results:
                 _export_cols = [
                     "id", "category", "question", "passed", "score",
                     "relevance", "accuracy", "completeness", "actionability", "safety",
-                    "generated_sql", "llm_response",
+                    "judge_reasoning", "generated_sql", "llm_response",
                     "llm_latency_ms", "execution_ms", "total_time_ms", "tokens_used",
                     "rows_returned", "error_message",
                 ]
