@@ -588,6 +588,13 @@ with tab_results:
         st.divider()
 
         results = db.get_results(selected_run_id)
+        if results:
+            total_tokens = sum(r.get("tokens_used") or 0 for r in results)
+            if total_tokens > 0:
+                mt1, mt2 = st.columns(2)
+                mt1.metric("Total Tokens Used", f"{total_tokens:,}")
+                mt2.metric("Avg Tokens / Test", f"{total_tokens / len(results):,.0f}")
+
         if not results:
             st.info("No results for this run.")
         else:
@@ -669,10 +676,11 @@ with tab_results:
                         # Performance metrics
                         if r.get("total_time_ms") is not None:
                             st.markdown("**Performance Metrics**")
-                            pm1, pm2, pm3 = st.columns(3)
+                            pm1, pm2, pm3, pm4 = st.columns(4)
                             pm1.metric("LLM Latency", f"{r.get('llm_latency_ms', 0):.0f} ms")
                             pm2.metric("Total Time", f"{r.get('total_time_ms', 0):.0f} ms")
                             pm3.metric("Rows Returned", r.get("rows_returned") or "—")
+                            pm4.metric("Tokens Used", r.get("tokens_used") if r.get("tokens_used") is not None else "—")
 
             st.divider()
             csv_cols = [
