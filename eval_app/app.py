@@ -442,6 +442,12 @@ with tab_run:
             key="run_judge_model_select",
             help="Model used to score conversational responses (can differ from evaluation model)",
         )
+        request_delay = st.selectbox(
+            "Delay between requests (seconds)",
+            [20, 30, 60],
+            index=2,
+            help="Pause between test cases to avoid provider rate limits (TPM)",
+        )
 
     with col_run:
         st.subheader("Progress")
@@ -528,7 +534,7 @@ with tab_run:
                             else:
                                 failed_count += 1
 
-                            time.sleep(60)
+                            time.sleep(request_delay)
 
                             summary_rows.append({
                                 "Prompt": prompt_row["name"],
