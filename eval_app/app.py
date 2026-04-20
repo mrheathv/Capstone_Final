@@ -772,7 +772,11 @@ with tab_compare:
                     cell = passed_icon
                     if score_val is not None:
                         cell += f" ({score_val:.2f})"
-                    pivot[key][run_label] = cell
+                    pivot[key][run_label] = {
+                        "display": cell,
+                        "passed": res.get("passed"),
+                        "score": score_val,
+                    }
 
                 # Category filter
                 cats_in_compare = list({k[0] for k in pivot})
@@ -783,16 +787,23 @@ with tab_compare:
 
                 run_labels_ordered = [run_id_to_label[rid] for rid in selected_ids]
                 rows = []
+                csv_rows = []
                 for (cat, question), run_cells in pivot.items():
                     if cat not in cat_filt:
                         continue
                     row = {"Category": cat, "Question": question[:80]}
+                    csv_row = {"Category": cat, "Question": question}
                     for rl in run_labels_ordered:
-                        row[rl] = run_cells.get(rl, "—")
+                        cell = run_cells.get(rl)
+                        row[rl] = cell["display"] if cell else "—"
+                        csv_row[f"{rl} - Pass/Fail"] = ("Pass" if cell["passed"] else "Fail") if cell else "—"
+                        csv_row[f"{rl} - Score"] = f"{cell['score']:.3f}" if cell and cell["score"] is not None else "—"
                     # Highlight rows where runs disagree
-                    pass_vals = [v.startswith("✅") for v in run_cells.values()]
+                    pass_vals = [c["passed"] for c in run_cells.values() if c]
                     row["Differs?"] = "⚠️" if len(set(pass_vals)) > 1 else ""
+                    csv_row["Differs?"] = "Yes" if len(set(pass_vals)) > 1 else "No"
                     rows.append(row)
+                    csv_rows.append(csv_row)
 
                 if rows:
                     df_cmp = pd.DataFrame(rows)
@@ -803,10 +814,10 @@ with tab_compare:
                     st.caption(
                         f"{differ_count} question(s) have different pass/fail outcomes across runs."
                     )
-                    csv_cmp = df_cmp.to_csv(index=False).encode("utf-8")
+                    df_csv = pd.DataFrame(csv_rows).sort_values("Differs?", ascending=False)
                     st.download_button(
                         label="⬇️ Export comparison to CSV",
-                        data=csv_cmp,
+                        data=df_csv.to_csv(index=False).encode("utf-8"),
                         file_name=f"eval_compare_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
                         mime="text/csv",
                     )
