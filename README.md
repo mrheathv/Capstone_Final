@@ -26,7 +26,12 @@ eval_app/
     ├── Capstone_Final.xlsx           # Test cases seed data
     └── Capstone Prompts Final.xlsx   # Prompt variants seed data
 Reference Files/
-└── rag_salesbot-main/  # Reference RAG salesbot app and sales.duckdb database
+└── rag_salesbot-main/          # Required — eval app imports from here at runtime
+    ├── app/                    # Python modules imported by evaluator.py
+    │   ├── database/           # DB connection and schema helpers
+    │   └── agent/              # Tool handlers
+    └── db/
+        └── sales.duckdb        # CRM database used during evaluations
 ```
 
 ## Setup
@@ -49,11 +54,15 @@ export DEEPSEEK_API_KEY='...'     # optional — only needed for DeepSeek models
 **3. Run the app**
 
 ```bash
+export PYTHONIOENCODING=utf-8
+export LANG=en_US.UTF-8
 cd eval_app
 streamlit run app.py
 ```
 
 Opens at `http://localhost:8501`. On first launch, the app creates `eval.duckdb` and seeds it with default test cases, prompts, and rubric weights from the included Excel files (if present).
+
+> **Note:** The `PYTHONIOENCODING` and `LANG` exports prevent encoding errors from curly/smart-quote characters in the prompt and test case text. If you see `'ascii' codec can't encode character` errors, these are the fix.
 
 > **Run locally, not on Streamlit Community Cloud.** Evaluation runs are long-running synchronous loops (with configurable delays between API calls). Streamlit Cloud's connection timeouts will kill runs mid-flight, and its ephemeral filesystem means your DuckDB data won't persist across restarts.
 
