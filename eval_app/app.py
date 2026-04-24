@@ -635,7 +635,9 @@ with tab_results:
                     "rows_returned", "error_message",
                 ]
                 df_exp = pd.DataFrame(filtered)
-                avail_cols = [c for c in _export_cols if c in df_exp.columns]
+                df_exp["eval_model"] = run_meta["model"]
+                df_exp["judge_model"] = run_meta.get("judge_model")
+                avail_cols = [c for c in _export_cols if c in df_exp.columns] + ["eval_model", "judge_model"]
                 csv_data = df_exp[avail_cols].to_csv(index=False).encode("utf-8")
                 run_slug = run_meta["run_name"].replace(" ", "_")[:40]
                 model_slug = run_meta["model"].replace("/", "-").replace(" ", "_")
@@ -701,7 +703,10 @@ with tab_results:
                 "llm_latency_ms", "execution_ms", "total_time_ms", "tokens_used",
                 "rows_returned", "error_message",
             ]
-            df_export = pd.DataFrame(filtered)[[c for c in csv_cols if c in pd.DataFrame(filtered).columns]]
+            df_export = pd.DataFrame(filtered)
+            df_export["eval_model"] = run_meta["model"]
+            df_export["judge_model"] = run_meta.get("judge_model")
+            df_export = df_export[[c for c in csv_cols if c in df_export.columns] + ["eval_model", "judge_model"]]
             st.download_button(
                 "⬇️ Download Results as CSV",
                 data=df_export.to_csv(index=False),
