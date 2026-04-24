@@ -34,8 +34,7 @@ Reference Files/
 **1. Install dependencies**
 
 ```bash
-cd eval_app
-pip install -r requirements.txt
+pip install -r eval_app/requirements.txt
 ```
 
 **2. Set API keys**
@@ -50,6 +49,7 @@ export DEEPSEEK_API_KEY="..."     # optional — only needed for DeepSeek models
 **3. Run the app**
 
 ```bash
+cd eval_app
 streamlit run app.py
 ```
 
