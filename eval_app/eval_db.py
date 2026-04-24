@@ -11,10 +11,8 @@ from datetime import datetime
 from typing import Optional
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "eval.duckdb")
-PROMPTS_EXCEL_PATH = os.path.join(os.path.dirname(__file__), "..",
-    "Reference Files", "rag_salesbot-main", "Capstone Prompts Final.xlsx")
-TEST_CASES_EXCEL_PATH = os.path.join(os.path.dirname(__file__), "..",
-    "Reference Files", "rag_salesbot-main", "Capstone_Final.xlsx")
+PROMPTS_EXCEL_PATH = os.path.join(os.path.dirname(__file__), "data", "Capstone Prompts Final.xlsx")
+TEST_CASES_EXCEL_PATH = os.path.join(os.path.dirname(__file__), "data", "Capstone_Final.xlsx")
 
 _seeded_from_excel = False  # set True after first init_db() call per server lifetime
 

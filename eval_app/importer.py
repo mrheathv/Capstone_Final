@@ -6,10 +6,7 @@ Safe to call multiple times; skips import if test_cases table already has data.
 import os
 import openpyxl
 
-EXCEL_PATH = os.path.join(
-    os.path.dirname(__file__), "..",
-    "Reference Files", "rag_salesbot-main", "Capstone_Final.xlsx"
-)
+EXCEL_PATH = os.path.join(os.path.dirname(__file__), "data", "Capstone_Final.xlsx")
 
 DEFAULT_TIME_THRESHOLD_MS = 10000.0  # 10 seconds generous default
 

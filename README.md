@@ -21,7 +21,10 @@ eval_app/
 ├── judge.py        # LLM-as-judge for conversational scoring
 ├── eval_db.py      # DuckDB database layer (test cases, runs, results, rubric)
 ├── importer.py     # Excel seeder for test cases and prompts
-└── requirements.txt
+├── requirements.txt
+└── data/
+    ├── Capstone_Final.xlsx           # Test cases seed data
+    └── Capstone Prompts Final.xlsx   # Prompt variants seed data
 Reference Files/
 └── rag_salesbot-main/  # Reference RAG salesbot app and sales.duckdb database
 ```
