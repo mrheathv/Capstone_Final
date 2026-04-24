@@ -45,11 +45,13 @@ pip install -r eval_app/requirements.txt
 **2. Set API keys**
 
 ```bash
-export OPENAI_API_KEY='sk-...'
-export ANTHROPIC_API_KEY='sk-ant-...'
-export GEMINI_API_KEY='...'       # optional — only needed for Gemini models
-export DEEPSEEK_API_KEY='...'     # optional — only needed for DeepSeek models
+export OPENAI_API_KEY=sk-...
+export ANTHROPIC_API_KEY=sk-ant-...
+export GEMINI_API_KEY=...       # optional — only needed for Gemini models
+export DEEPSEEK_API_KEY=...     # optional — only needed for DeepSeek models
 ```
+
+> **No quotes around the key value.** Copying a quoted command from a rendered document (GitHub, PDF, Word) can silently replace straight quotes with curly/smart quotes, which get included as part of the key and cause an `'ascii' codec` error. If you see that error, run `echo $OPENAI_API_KEY` — if the value starts with `'`, re-export without quotes.
 
 **3. Run the app**
 
