@@ -663,12 +663,12 @@ def init_db():
                 """, [i, item["category"], item["item_key"], item["label"],
                       item.get("weight"), item["description"], item["position"]])
 
-        # Re-seed prompts and test cases from Excel on every server startup
+        # Seed prompts and test cases only when the tables are empty
         if not _seeded_from_excel:
-            con.execute("DELETE FROM prompts")
-            con.execute("DELETE FROM test_cases")
-            _seed_prompts(con)
-            _seed_test_cases(con)
+            if con.execute("SELECT COUNT(*) FROM prompts").fetchone()[0] == 0:
+                _seed_prompts(con)
+            if con.execute("SELECT COUNT(*) FROM test_cases").fetchone()[0] == 0:
+                _seed_test_cases(con)
 
         con.commit()
     finally:
