@@ -45,26 +45,39 @@ pip install -r eval_app/requirements.txt
 **2. Set API keys**
 
 ```bash
-export OPENAI_API_KEY='sk-...'
-export ANTHROPIC_API_KEY='sk-ant-...'
-export GEMINI_API_KEY='...'       # optional — only needed for Gemini models
-export DEEPSEEK_API_KEY='...'     # optional — only needed for DeepSeek models
+export OPENAI_API_KEY=sk-...
+export ANTHROPIC_API_KEY=sk-ant-...
+export GEMINI_API_KEY=...       # optional — only needed for Gemini models
+export DEEPSEEK_API_KEY=...     # optional — only needed for DeepSeek models
 ```
+
+> **No quotes around the key value.** Copying a quoted command from a rendered document (GitHub, PDF, Word) can silently replace straight quotes with curly/smart quotes, which get included as part of the key and cause an `'ascii' codec` error. If you see that error, run `echo $OPENAI_API_KEY` — if the value starts with `'`, re-export without quotes.
 
 **3. Run the app**
 
 ```bash
-export PYTHONIOENCODING=utf-8
-export LANG=en_US.UTF-8
 cd eval_app
 streamlit run app.py
 ```
 
 Opens at `http://localhost:8501`. On first launch, the app creates `eval.duckdb` and seeds it with default test cases, prompts, and rubric weights from the included Excel files (if present).
 
-> **Note:** The `PYTHONIOENCODING` and `LANG` exports prevent encoding errors from curly/smart-quote characters in the prompt and test case text. If you see `'ascii' codec can't encode character` errors, these are the fix.
-
 > **Run locally, not on Streamlit Community Cloud.** Evaluation runs are long-running synchronous loops (with configurable delays between API calls). Streamlit Cloud's connection timeouts will kill runs mid-flight, and its ephemeral filesystem means your DuckDB data won't persist across restarts.
+
+## Data Persistence
+
+All data is stored in `eval_app/eval.duckdb`, a local DuckDB file created on first launch.
+
+**What persists across restarts:** everything — test cases, prompts, rubric edits, evaluation runs, and results.
+
+**Initial seeding:** on the very first launch (when the database is empty), the app seeds test cases and prompts from the Excel files in `eval_app/data/`:
+
+- `Capstone_Final.xlsx` — seeds the Conversational, SQL, and Performance test case tabs
+- `Capstone Prompts Final.xlsx` — seeds the Prompts tab with the initial prompt variants
+
+After that first launch, seeding is skipped. Any test cases or prompts you add, edit, or delete through the UI are saved permanently to `eval.duckdb` and will still be there after a restart.
+
+**To reset to the original seed data:** delete `eval_app/eval.duckdb` and restart the app. The database will be recreated and re-seeded from the Excel files.
 
 ## Usage
 
