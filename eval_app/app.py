@@ -62,50 +62,6 @@ AVAILABLE_MODELS = [
 
 CATEGORIES = ["conversational", "sql", "performance"]
 
-# ── Sidebar ────────────────────────────────────────────────────────────────────
-with st.sidebar:
-    st.header("Settings")
-
-    selected_model = st.selectbox(
-        "Evaluation Model",
-        AVAILABLE_MODELS,
-        index=0,
-        help="Model used as the CRM salesbot agent during evaluations",
-    )
-
-    # Default judge to gpt-4o-mini if available, otherwise first model
-    _default_judge_idx = next(
-        (i for i, m in enumerate(AVAILABLE_MODELS) if m == "gpt-4o-mini"), 0
-    )
-    selected_judge_model = st.selectbox(
-        "Judge Model",
-        AVAILABLE_MODELS,
-        index=_default_judge_idx,
-        help=(
-            "Separate model used to score conversational responses. "
-            "Can be a different provider than the evaluation model."
-        ),
-    )
-
-    prompts_list = db.get_prompts()
-    prompt_names = [p["name"] for p in prompts_list]
-    default_idx = next(
-        (i for i, p in enumerate(prompts_list) if p.get("is_default")), 0
-    )
-    selected_prompt_name = st.selectbox(
-        "Active Prompt",
-        prompt_names,
-        index=default_idx,
-        help="Prompt used for single-run evaluations",
-    )
-    selected_prompt = next(
-        (p for p in prompts_list if p["name"] == selected_prompt_name), prompts_list[0]
-    )
-
-    st.divider()
-    tc_count = db.count_test_cases()
-    st.metric("Total Test Cases", tc_count)
-
 # ── Tabs ───────────────────────────────────────────────────────────────────────
 tab_tests, tab_prompts, tab_run, tab_results, tab_compare = st.tabs(
     ["📋 Test Cases", "✏️ Prompts", "▶️ Run Evaluation", "📊 Results", "🔀 Compare"]
@@ -432,13 +388,13 @@ with tab_run:
         run_model = st.selectbox(
             "Evaluation model",
             AVAILABLE_MODELS,
-            index=AVAILABLE_MODELS.index(selected_model),
+            index=0,
             key="run_model_select",
         )
         run_judge_model = st.selectbox(
             "Judge model",
             AVAILABLE_MODELS,
-            index=AVAILABLE_MODELS.index(selected_judge_model),
+            index=next((i for i, m in enumerate(AVAILABLE_MODELS) if m == "gpt-4o-mini"), 0),
             key="run_judge_model_select",
             help="Model used to score conversational responses (can differ from evaluation model)",
         )
