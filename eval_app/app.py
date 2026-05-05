@@ -29,7 +29,7 @@ st.set_page_config(
     layout="wide",
 )
 
-st.title("🧪 LLM Evaluation Suite")
+st.title("LLM Evaluation Suite")
 st.caption("Evaluate RAG chatbot quality across Conversational, SQL, and Performance dimensions.")
 
 AVAILABLE_MODELS = [
