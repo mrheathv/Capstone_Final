@@ -1,6 +1,6 @@
 # LLM Evaluation Suite
 
-A Streamlit app for evaluating RAG chatbot quality across **Conversational**, **SQL**, and **Performance** dimensions. Supports multi-model evaluation using OpenAI, Anthropic, Google Gemini, and DeepSeek — with a separate LLM-as-judge for scoring conversational responses.
+A Streamlit app built with Claude (Anthropic) for evaluating RAG chatbot quality across **Conversational**, **SQL**, and **Performance** dimensions. Supports multi-model evaluation using OpenAI, Anthropic, Google Gemini, and DeepSeek — with a separate LLM-as-judge for scoring conversational responses.
 
 ## Features
 
