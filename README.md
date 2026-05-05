@@ -89,6 +89,8 @@ After that first launch, seeding is skipped. Any test cases or prompts you add, 
 | **Results** | View pass/fail metrics, per-test details, judge reasoning, and token usage. Export to CSV. |
 | **Compare** | Side-by-side comparison of two or more runs, with disagreement highlighting. |
 
+> **Delay between requests:** The Run Evaluation tab includes a configurable delay between API calls. This pause is intentional — it prevents TPM (tokens per minute) rate limit errors when running large evaluation batches against provider APIs.
+
 ## Evaluation Categories
 
 **Conversational** — The LLM judge scores each response on five dimensions (1–5 scale), weighted and combined into a single score. Pass threshold: weighted score ≥ 3.0.
