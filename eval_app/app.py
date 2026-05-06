@@ -764,7 +764,7 @@ with tab_compare:
                 st.info("No results found for selected runs.")
             else:
                 run_id_to_label = {
-                    r["id"]: f"{r['prompt_name']} / {r['model']}"
+                    r["id"]: f"[{r['id']}] {r['prompt_name']} / {r['model']}"
                     for r in selected_runs
                 }
 
