@@ -103,11 +103,11 @@ After that first launch, seeding is skipped. Any test cases or prompts you add, 
 | Actionability | 10% |
 | Safety | 15% |
 
-Weights are editable from the Test Cases tab and auto-normalized.
-
+(Weights are editable from the Test Cases tab.)
 **SQL** — Pass/fail based on: valid SQL generated, successful execution, result accuracy, and optional row count match against an expected value.
 
 **Performance** — Pass/fail based on: successful execution, total latency ≤ threshold (ms), and optional row count match.
+(Performace Testing is an included feature but was tested the least by the team)
 
 ## Supported Models
 
