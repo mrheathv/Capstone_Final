@@ -51,8 +51,6 @@ export GEMINI_API_KEY=...       # optional — only needed for Gemini models
 export DEEPSEEK_API_KEY=...     # optional — only needed for DeepSeek models
 ```
 
-> **No quotes around the key value.** Copying a quoted command from a rendered document (GitHub, PDF, Word) can silently replace straight quotes with curly/smart quotes, which get included as part of the key and cause an `'ascii' codec` error. If you see that error, run `echo $OPENAI_API_KEY` — if the value starts with `'`, re-export without quotes.
-
 **3. Run the app**
 
 ```bash
@@ -62,7 +60,7 @@ streamlit run app.py
 
 Opens at `http://localhost:8501`. On first launch, the app creates `eval.duckdb` and seeds it with default test cases, prompts, and rubric weights from the included Excel files (if present).
 
-> **Run locally, not on Streamlit Community Cloud.** Evaluation runs are long-running synchronous loops (with configurable delays between API calls). Streamlit Cloud's connection timeouts will kill runs mid-flight, and its ephemeral filesystem means your DuckDB data won't persist across restarts.
+> **Run locally instead of Streamlit Cloud:** Evaluation runs are long-running. Streamlit Cloud's connection timeouts will kill runs mid-flight, and your DuckDB data won't save across restarts.
 
 ## Data Persistence
 
