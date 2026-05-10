@@ -100,6 +100,7 @@ After first launch, seeding is skipped. Any test cases or prompts you add, edit,
 | Safety | 15% |
 
 (Weights are editable from the Test Cases tab.)
+
 **SQL** — Pass/fail based on: valid SQL generated, successful execution, result accuracy, and optional row count match against an expected value.
 
 **Performance** — Pass/fail based on: successful execution, total latency ≤ threshold (ms), and optional row count match.
