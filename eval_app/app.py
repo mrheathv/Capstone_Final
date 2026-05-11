@@ -368,10 +368,28 @@ with tab_run:
             value=f"Run {datetime.now().strftime('%Y-%m-%d %H:%M')}",
         )
 
-        st.write("**Categories to evaluate:**")
-        do_conv = st.checkbox("Conversational", value=True)
-        do_sql = st.checkbox("SQL", value=True)
-        do_perf = st.checkbox("Performance", value=False)
+        st.write("**Category to evaluate:**")
+        eval_category = st.radio(
+            "Category",
+            options=["Conversational", "SQL", "Performance"],
+            index=0,
+            label_visibility="collapsed",
+            key="eval_category_radio",
+        )
+
+        if eval_category != "SQL":
+            use_default_sql = st.toggle(
+                "Use Default SQL Prompt",
+                value=False,
+                key="use_default_sql_toggle",
+                help=(
+                    "When enabled, every selected prompt uses its own conversational/system prompt "
+                    "but substitutes the default prompt's SQL prompt. This isolates conversational "
+                    "quality without also varying SQL generation."
+                ),
+            )
+        else:
+            use_default_sql = False
 
         st.write("**Prompt(s) to run:**")
         prompt_selections = {}
@@ -409,19 +427,27 @@ with tab_run:
         st.subheader("Progress")
 
         if st.button("▶️ Run Evaluation", type="primary", use_container_width=True):
-            if not any([do_conv, do_sql, do_perf]):
-                st.error("Select at least one category to evaluate.")
-            elif not selected_prompt_ids:
+            if not selected_prompt_ids:
                 st.error("Select at least one prompt.")
             else:
                 # Build list of (category, test_cases) pairs to run
-                run_queue = []
-                if do_conv:
-                    run_queue += [("conversational", tc) for tc in db.get_test_cases("conversational")]
-                if do_sql:
-                    run_queue += [("sql", tc) for tc in db.get_test_cases("sql")]
-                if do_perf:
-                    run_queue += [("performance", tc) for tc in db.get_test_cases("performance")]
+                category_key = eval_category.lower()
+                run_queue = [
+                    (category_key, tc) for tc in db.get_test_cases(category_key)
+                ]
+
+                # Fetch default prompt's SQL once if override is requested
+                default_sql_prompt = None
+                if use_default_sql:
+                    all_p = db.get_prompts()
+                    default_p = next((p for p in all_p if p.get("is_default")), None)
+                    if default_p:
+                        default_sql_prompt = default_p["sql_prompt"]
+                    else:
+                        st.warning(
+                            "No default prompt is set — 'Use Default SQL Prompt' has no effect. "
+                            "Mark a prompt as default in the Prompts tab."
+                        )
 
                 if not run_queue:
                     st.warning("No test cases found. Add test cases in the Test Cases tab.")
@@ -438,7 +464,11 @@ with tab_run:
                         prompt_row = db.get_prompt(prompt_id)
                         prompt_dict = {
                             "system_prompt": prompt_row["system_prompt"],
-                            "sql_prompt": prompt_row["sql_prompt"],
+                            "sql_prompt": (
+                                default_sql_prompt
+                                if default_sql_prompt is not None
+                                else prompt_row["sql_prompt"]
+                            ),
                         }
                         run_id = db.create_run(
                             run_name_input, run_model, prompt_id, prompt_row["name"],
